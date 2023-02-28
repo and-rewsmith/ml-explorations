@@ -1,0 +1,1 @@
+This project implements MNIST on a simple ANN using pytorch.
