@@ -1,9 +1,11 @@
 Implementation of a simple SNN.
 
 Libraries:
+
 https://spikingjelly.readthedocs.io/zh_CN/latest/activation_based_en/lif_fc_mnist.html
 
 Resources:
+
 https://cnvrg.io/spiking-neural-networks/
 https://www.youtube.com/watch?v=7TybETlCslM
 
