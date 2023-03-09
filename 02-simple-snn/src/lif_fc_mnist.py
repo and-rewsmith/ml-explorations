@@ -1,6 +1,8 @@
 """
 Tutorial from here:
 https://github.com/fangwei123456/spikingjelly/blob/master/spikingjelly/activation_based/examples/lif_fc_mnist.py
+
+TODO: can we get multi step?
 """
 
 import os
