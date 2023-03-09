@@ -11,3 +11,6 @@ spikingjelly
 
 # logs
 logs
+
+# numpy files
+*.npy
