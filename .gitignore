@@ -1,4 +1,13 @@
-dataset*/
+# virtual environments
 env*/
-results/
+
+# datasets and output
+dataset*/
 data*/
+results/
+
+# spikingjelly local repo for install
+spikingjelly
+
+# logs
+logs
