@@ -68,7 +68,8 @@ if __name__ == "__main__":
     lr = 0.1
     batch_size = 64
 
-    step_mode = "s"
+    # if this changes we need to alter network input sizes in network and out
+    step_mode = "m"
 
     # should bias towards disincentivizing spikes coming too early
     tau_pre = 2.
@@ -134,9 +135,16 @@ if __name__ == "__main__":
     optimizer_stdp.zero_grad()
 
     x_seq = (example_data > 0.5).float()
+    # convert to sensible shape
     x_seq = x_seq.view(x_seq.size(0), -1)
+    # convert to multistep
+    T = 100
+    x_seq = torch.unsqueeze(x_seq, 0).repeat(T, 1, 1)
+    print("x_resize: ", x_seq.shape)
+
     print("x: " + str(x_seq.shape))
-    y = net(x_seq)
+    y = functional.multi_step_forward(x_seq, net)
+    y = torch.mean(y, dim=0)
     print("y: ", y.shape)
     _, predicted = torch.max(y, dim=1)
     print("predicted: ", predicted)
