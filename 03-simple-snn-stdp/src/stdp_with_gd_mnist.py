@@ -54,7 +54,6 @@ def f_weight(x):
     return torch.clamp(x, -1, 1.)
 
 
-# TODO: actually use mps
 # TODO: figure out if we can do multiple timesteps
 # TODO: multiple epochs each with multiple batches
 if __name__ == "__main__":
@@ -84,7 +83,7 @@ if __name__ == "__main__":
         neuron.IFNode(),
         layer.Linear(28, 10, bias=False),
         neuron.IFNode(),
-    )
+    ).to(device)
 
     # train linear layer with stdp and ifnode with sgd
     functional.set_step_mode(net, step_mode)
@@ -123,6 +122,8 @@ if __name__ == "__main__":
     # test forward pass
     examples = enumerate(train_data_loader)
     batch_idx, (example_data, example_targets) = next(examples)
+    example_data = example_data.to(device)
+    example_targets = example_targets.to(device)
     # targets_onehot = torch.nn.functional.one_hot(example_targets)
     print("batch_idx: " + str(batch_idx))
     print("example_data: " + str(example_data.shape))
