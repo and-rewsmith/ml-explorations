@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from torch.optim import SGD, Adam
 import torch.utils.data as data
 import torchvision
+import tqdm
 
 from spikingjelly.activation_based import learning, layer, neuron, functional
 
@@ -53,19 +54,22 @@ def f_weight(x):
     return torch.clamp(x, -1, 1.)
 
 
+# TODO: actually use mps
+# TODO: figure out if we can do multiple timesteps
+# TODO: multiple epochs each with multiple batches
 if __name__ == "__main__":
     # this ensures that the current MacOS version is at least 12.3+
-    print(torch.backends.mps.is_available())
+    assert torch.backends.mps.is_available()
     # this ensures that the current current PyTorch installation was built with MPS activated.
-    print(torch.backends.mps.is_built())
+    assert torch.backends.mps.is_built()
     # set the output to device: mps
     device = torch.device("mps")
 
+    epochs = 2
     lr = 0.1
     batch_size = 64
 
-    # multi step mode
-    step_mode = "m"
+    step_mode = "s"
 
     # should bias towards disincentivizing spikes coming too early
     tau_pre = 2.
@@ -78,7 +82,7 @@ if __name__ == "__main__":
         neuron.IFNode(),
         layer.Linear(28, 28, bias=False),
         neuron.IFNode(),
-        layer.Linear(28, 28, bias=False),
+        layer.Linear(28, 10, bias=False),
         neuron.IFNode(),
     )
 
@@ -88,10 +92,12 @@ if __name__ == "__main__":
     stdp_learners = []
 
     # last layer train with sgd
+    instances_stdp = (layer.Conv2d, )
     for i in range(0, net.__len__() - 1):
-        stdp_learners.append(
-            learning.STDPLearner(step_mode=step_mode, synapse=net[i], sn=net[i+1], tau_pre=tau_pre, tau_post=tau_post,
-                                 f_pre=f_weight, f_post=f_weight))
+        if isinstance(net[i], instances_stdp):
+            stdp_learners.append(
+                learning.STDPLearner(step_mode=step_mode, synapse=net[i], sn=net[i+1], tau_pre=tau_pre, tau_post=tau_post,
+                                     f_pre=f_weight, f_post=f_weight))
 
     # last layer train with sgd
     params_stdp = []
@@ -117,15 +123,47 @@ if __name__ == "__main__":
     # test forward pass
     examples = enumerate(train_data_loader)
     batch_idx, (example_data, example_targets) = next(examples)
+    # targets_onehot = torch.nn.functional.one_hot(example_targets)
+    print("batch_idx: " + str(batch_idx))
+    print("example_data: " + str(example_data.shape))
+    print("example_targets: " + str(example_targets.shape))
+    # print("targets_onehot: ", str(targets_onehot.shape))
 
-    print(example_data.shape)
+    optimizer_stdp.zero_grad()
+    optimizer_stdp.zero_grad()
 
     x_seq = (example_data > 0.5).float()
     x_seq = x_seq.view(x_seq.size(0), -1)
-    print(x_seq.shape)
+    print("x: " + str(x_seq.shape))
     y = net(x_seq)
     print("y: ", y.shape)
+    _, predicted = torch.max(y, dim=1)
+    print("predicted: ", predicted)
 
-    print(batch_idx, example_data.shape, example_targets.shape)
+    loss_fn = nn.CrossEntropyLoss()
+    loss = loss_fn(y, example_targets)
+    print("loss: " + str(loss))
+
+    loss.backward()
+    # zero gradients for non backprop trained layers
+    optimizer_stdp.zero_grad()
+
+    for i in range(stdp_learners.__len__()):
+        stdp_learners[i].step(on_grad=True)
+
+    optimizer_gd.step()
+    optimizer_stdp.step()
+
+    print("params_stdp: ")
+    for p in params_stdp:
+        print(p.shape)
+    print()
+    print("params_gradient_descent: ")
+    for p in params_gradient_descent:
+        print(p.shape)
+    print()
+
+    # for epoch in tqdm(range(0, epochs)):
+    #     net.train()
 
     print("done")

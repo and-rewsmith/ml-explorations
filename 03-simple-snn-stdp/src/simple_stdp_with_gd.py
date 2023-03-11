@@ -20,8 +20,10 @@ tau_pre = 2.
 tau_post = 100.
 step_mode = 'm'
 
+
 def f_weight(x):
     return torch.clamp(x, -1, 1.)
+
 
 # TODO: Figure out context on problem I see with this:
 # 1. We are passing the whole matrix of timestamps into this network as multistep, but since we are using a combination of STDP and gradient descent, this requires the layer size to be arbitrarily high for non STDP layers which might otherwise be able to avoid it in certain scenarios.
@@ -50,7 +52,7 @@ for i in range(net.__len__()):
     if isinstance(net[i], instances_stdp):
         stdp_learners.append(
             learning.STDPLearner(step_mode=step_mode, synapse=net[i], sn=net[i+1], tau_pre=tau_pre, tau_post=tau_post,
-                                f_pre=f_weight, f_post=f_weight)
+                                 f_pre=f_weight, f_post=f_weight)
         )
 
 params_stdp = []
@@ -89,13 +91,13 @@ optimizer_stdp.zero_grad()
 y = net(x_seq).mean(0)
 loss = F.cross_entropy(y, target)
 loss.backward()
+# zero gradients for non backprop trained layers
+optimizer_stdp.zero_grad()
 
 print("predicted: ", y)
 print()
 print("loss: ", loss)
 print()
-
-optimizer_stdp.zero_grad()
 
 for i in range(stdp_learners.__len__()):
     stdp_learners[i].step(on_grad=True)
