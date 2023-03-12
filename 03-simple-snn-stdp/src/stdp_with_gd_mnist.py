@@ -87,7 +87,6 @@ if __name__ == "__main__":
     tau_pre = 2.
     tau_post = 100.
 
-    # simple network
     # linear layers are the weights
     net = nn.Sequential(
         layer.Conv2d(1, 16, kernel_size=3, stride=1, padding=1, bias=False),
@@ -146,10 +145,6 @@ if __name__ == "__main__":
         example_targets = example_targets.to(device)
         targets_onehot = torch.nn.functional.one_hot(example_targets).float()
 
-        # print("batch_idx: " + str(batch_idx))
-        # print("example_data: " + str(example_data.shape))
-        # print("example_targets: " + str(example_targets.shape))
-
         functional.reset_net(net)
 
         # convert to sensible shape
@@ -158,21 +153,12 @@ if __name__ == "__main__":
         x_seq = x_seq.view(T, 64, 1, 28, 28)
         x_seq = encoder(x_seq)
         print("x: " + str(x_seq.shape))
-        # print("x: ", str(x_seq[0:2]))
 
         # TODO: figure this out! This is causing the failure
         y = functional.multi_step_forward(x_seq.unsqueeze(0), net)
-        # print("y: ", str(y.shape))
         y = torch.mean(y, dim=0)
-        # print("y: ", str(y.shape))
-        # print("labels: ", str(targets_onehot.shape))
-        # print(y)
         _, predicted = torch.max(y, dim=1)
         print()
-        # print("y: ", str(y.shape))
-        # print("y: ", str(y[0:2]))
-        # print("predicted first 5: ", predicted[0:2])
-        # print("actual first 5: ", example_targets[:2])
         print()
 
         loss_fn = nn.CrossEntropyLoss()
