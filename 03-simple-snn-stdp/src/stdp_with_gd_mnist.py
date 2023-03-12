@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torch.optim import SGD, Adam
 import torch.utils.data as data
 import torchvision
-import tqdm
+from tqdm import tqdm
 
 from spikingjelly.activation_based import learning, layer, neuron, functional
 
@@ -54,7 +54,6 @@ def f_weight(x):
     return torch.clamp(x, -1, 1.)
 
 
-# TODO: figure out if we can do multiple timesteps
 # TODO: multiple epochs each with multiple batches
 if __name__ == "__main__":
     # this ensures that the current MacOS version is at least 12.3+
@@ -122,57 +121,59 @@ if __name__ == "__main__":
 
     # test forward pass
     examples = enumerate(train_data_loader)
-    batch_idx, (example_data, example_targets) = next(examples)
-    example_data = example_data.to(device)
-    example_targets = example_targets.to(device)
-    # targets_onehot = torch.nn.functional.one_hot(example_targets)
-    print("batch_idx: " + str(batch_idx))
-    print("example_data: " + str(example_data.shape))
-    print("example_targets: " + str(example_targets.shape))
-    # print("targets_onehot: ", str(targets_onehot.shape))
+    for batch_idx, (example_data, example_targets) in tqdm(enumerate(train_data_loader)):
+        example_data = example_data.to(device)
+        example_targets = example_targets.to(device)
+        # targets_onehot = torch.nn.functional.one_hot(example_targets)
+        print("batch_idx: " + str(batch_idx))
+        print("example_data: " + str(example_data.shape))
+        print("example_targets: " + str(example_targets.shape))
 
-    optimizer_stdp.zero_grad()
-    optimizer_stdp.zero_grad()
+        optimizer_stdp.zero_grad()
+        optimizer_stdp.zero_grad()
 
-    x_seq = (example_data > 0.5).float()
-    # convert to sensible shape
-    x_seq = x_seq.view(x_seq.size(0), -1)
-    # convert to multistep
-    T = 100
-    x_seq = torch.unsqueeze(x_seq, 0).repeat(T, 1, 1)
-    print("x_resize: ", x_seq.shape)
+        x_seq = (example_data > 0.5).float()
+        # convert to sensible shape
+        x_seq = x_seq.view(x_seq.size(0), -1)
+        # convert to multistep
+        T = 2
+        x_seq = torch.unsqueeze(x_seq, 0).repeat(T, 1, 1)
+        print("x_resize: ", x_seq.shape)
 
-    print("x: " + str(x_seq.shape))
-    y = functional.multi_step_forward(x_seq, net)
-    y = torch.mean(y, dim=0)
-    print("y: ", y.shape)
-    _, predicted = torch.max(y, dim=1)
-    print("predicted: ", predicted)
+        print("x: " + str(x_seq.shape))
+        y = functional.multi_step_forward(x_seq, net)
+        y = torch.mean(y, dim=0)
+        print("y: ", y.shape)
+        _, predicted = torch.max(y, dim=1)
+        print("predicted: ", predicted)
 
-    loss_fn = nn.CrossEntropyLoss()
-    loss = loss_fn(y, example_targets)
-    print("loss: " + str(loss))
+        loss_fn = nn.CrossEntropyLoss()
+        loss = loss_fn(y, example_targets)
+        print("loss: " + str(loss))
 
-    loss.backward()
-    # zero gradients for non backprop trained layers
-    optimizer_stdp.zero_grad()
+        loss.backward()
+        # zero gradients for non backprop trained layers
+        optimizer_stdp.zero_grad()
 
-    for i in range(stdp_learners.__len__()):
-        stdp_learners[i].step(on_grad=True)
+        for i in range(stdp_learners.__len__()):
+            stdp_learners[i].step(on_grad=True)
 
-    optimizer_gd.step()
-    optimizer_stdp.step()
+        optimizer_gd.step()
+        optimizer_stdp.step()
 
-    print("params_stdp: ")
-    for p in params_stdp:
-        print(p.shape)
-    print()
-    print("params_gradient_descent: ")
-    for p in params_gradient_descent:
-        print(p.shape)
-    print()
+        print("params_stdp: ")
+        for p in params_stdp:
+            print(p.shape)
+        print()
+        print("params_gradient_descent: ")
+        for p in params_gradient_descent:
+            print(p.shape)
+        print()
 
-    # for epoch in tqdm(range(0, epochs)):
-    #     net.train()
+        net.zero_grad()
+        optimizer_stdp.zero_grad()
+        optimizer_gd.zero_grad()
+
+        functional.reset_net(net)
 
     print("done")
