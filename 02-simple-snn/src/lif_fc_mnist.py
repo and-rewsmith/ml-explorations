@@ -23,6 +23,7 @@ import numpy as np
 
 from spikingjelly.activation_based import neuron, encoding, functional, surrogate, layer
 
+
 def MNIST_loaders(args):
     train_dataset = torchvision.datasets.MNIST(
         root=args.data_dir,
@@ -56,6 +57,7 @@ def MNIST_loaders(args):
 
     return train_data_loader, test_data_loader, train_dataset, test_dataset
 
+
 class SNN(nn.Module):
     def __init__(self, tau):
         super().__init__()
@@ -65,36 +67,46 @@ class SNN(nn.Module):
             layer.Linear(28 * 28, 10, bias=False),
             # https://spikingjelly.readthedocs.io/zh_CN/latest/activation_based_en/neuron.html#spiking-neuron-modules
             neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan()),
-            )
+        )
 
     def forward(self, x: torch.Tensor):
         return self.layer(x)
 
+
 if __name__ == '__main__':
     # BLOCK: Arg parsing.
     parser = argparse.ArgumentParser(description='LIF MNIST Training')
-    parser.add_argument('-T', default=100, type=int, help='simulating time-steps')
+    parser.add_argument('-T', default=100, type=int,
+                        help='simulating time-steps')
     parser.add_argument('-device', default='mps:0', help='device')
     parser.add_argument('-b', default=64, type=int, help='batch size')
     parser.add_argument('-epochs', default=100, type=int, metavar='N',
                         help='number of total epochs to run')
     parser.add_argument('-j', default=4, type=int, metavar='N',
                         help='number of data loading workers (default: 4)')
-    parser.add_argument('-data-dir', type=str, help='root dir of MNIST dataset')
-    parser.add_argument('-out-dir', type=str, default='./logs', help='root dir for saving logs and checkpoint')
-    parser.add_argument('-resume', type=str, help='resume from the checkpoint path')
+    parser.add_argument('-data-dir', type=str,
+                        help='root dir of MNIST dataset')
+    parser.add_argument('-out-dir', type=str, default='./logs',
+                        help='root dir for saving logs and checkpoint')
+    parser.add_argument('-resume', type=str,
+                        help='resume from the checkpoint path')
     # cannot use amp with mps
-    parser.add_argument('-amp', action='store_true', help='automatic mixed precision training')
-    parser.add_argument('-opt', type=str, choices=['sgd', 'adam'], default='adam', help='use which optimizer. SGD or Adam')
-    parser.add_argument('-momentum', default=0.9, type=float, help='momentum for SGD')
+    parser.add_argument('-amp', action='store_true',
+                        help='automatic mixed precision training')
+    parser.add_argument(
+        '-opt', type=str, choices=['sgd', 'adam'], default='adam', help='use which optimizer. SGD or Adam')
+    parser.add_argument('-momentum', default=0.9,
+                        type=float, help='momentum for SGD')
     parser.add_argument('-lr', default=1e-3, type=float, help='learning rate')
-    parser.add_argument('-tau', default=2.0, type=float, help='parameter tau of LIF neuron')
+    parser.add_argument('-tau', default=2.0, type=float,
+                        help='parameter tau of LIF neuron')
 
     args = parser.parse_args()
     print("arguments:" + str(args))
 
     # BLOCK: Initialize helpful entities.
-    train_data_loader, test_data_loader, train_dataset, test_dataset = MNIST_loaders(args)
+    train_data_loader, test_data_loader, train_dataset, test_dataset = MNIST_loaders(
+        args)
 
     net = SNN(tau=args.tau)
     net.to(args.device)
@@ -110,7 +122,8 @@ if __name__ == '__main__':
 
     optimizer = None
     if args.opt == 'sgd':
-        optimizer = torch.optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum)
+        optimizer = torch.optim.SGD(
+            net.parameters(), lr=args.lr, momentum=args.momentum)
     elif args.opt == 'adam':
         optimizer = torch.optim.Adam(net.parameters(), lr=args.lr)
     else:
@@ -122,8 +135,9 @@ if __name__ == '__main__':
         optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch = checkpoint['epoch'] + 1
         max_test_acc = checkpoint['max_test_acc']
-    
-    out_dir = os.path.join(args.out_dir, f'T{args.T}_b{args.b}_{args.opt}_lr{args.lr}')
+
+    out_dir = os.path.join(
+        args.out_dir, f'T{args.T}_b{args.b}_{args.opt}_lr{args.lr}')
 
     if args.amp:
         out_dir += '_amp'
@@ -132,7 +146,7 @@ if __name__ == '__main__':
         os.makedirs(out_dir)
         print(f'making directory: {out_dir}.')
 
-    # print args 
+    # print args
     with open(os.path.join(out_dir, 'args.txt'), 'w', encoding='utf-8') as args_txt:
         args_txt.write(str(args))
 
@@ -174,6 +188,7 @@ if __name__ == '__main__':
                 for t in range(args.T):
                     encoded_img = encoder(img)
                     out_fr += net(encoded_img)
+                    print(out_fr)
                 out_fr = out_fr / args.T
                 loss = F.mse_loss(out_fr, label_onehot)
                 loss.backward()
@@ -248,16 +263,18 @@ if __name__ == '__main__':
         print(args)
         print(out_dir)
         print(f'epoch ={epoch}, train_loss ={train_loss: .4f}, train_acc ={train_acc: .4f}, test_loss ={test_loss: .4f}, test_acc ={test_acc: .4f}, max_test_acc ={max_test_acc: .4f}')
-        print(f'train speed ={train_speed: .4f} images/s, test speed ={test_speed: .4f} images/s')
+        print(
+            f'train speed ={train_speed: .4f} images/s, test speed ={test_speed: .4f} images/s')
         print(f'escape time = {(datetime.datetime.now() + datetime.timedelta(seconds=(time.time() - start_time) * (args.epochs - epoch))).strftime("%Y-%m-%d %H:%M:%S")}\n')
 
     # BLOCK: Output visual information
     # Save data for plotting
     net.eval()
     # Register a hook
-    output_layer = net.layer[-1] # Output layer
+    output_layer = net.layer[-1]  # Output layer
     output_layer.v_seq = []
     output_layer.s_seq = []
+
     def save_hook(m, x, y):
         m.v_seq.append(m.v.unsqueeze(0))
         m.s_seq.append(y.unsqueeze(0))
@@ -277,17 +294,13 @@ if __name__ == '__main__':
         output_layer.v_seq = torch.cat(output_layer.v_seq)
         output_layer.s_seq = torch.cat(output_layer.s_seq)
         # Extract the membrane potential data from the output layer and convert it to a Numpy array
-        v_t_array = output_layer.v_seq.cpu().numpy().squeeze()  # v_t_array[i][j] represents the voltage value of neuron i at time step j
+        # v_t_array[i][j] represents the voltage value of neuron i at time step j
+        v_t_array = output_layer.v_seq.cpu().numpy().squeeze()
         # Save the membrane potential data to a Numpy binary file
-        np.save("v_t_array.npy",v_t_array)
+        np.save("v_t_array.npy", v_t_array)
 
         # Extract the spike output data from the output layer and convert it to a Numpy array
-        s_t_array = output_layer.s_seq.cpu().numpy().squeeze()  # s_t_array[i][j] represents the output spike of neuron i at time step j, where 0 or 1 indicates no or a spike, respectively
+        # s_t_array[i][j] represents the output spike of neuron i at time step j, where 0 or 1 indicates no or a spike, respectively
+        s_t_array = output_layer.s_seq.cpu().numpy().squeeze()
         # Save the spike output data to a Numpy binary file
-        np.save("s_t_array.npy",s_t_array)
-
-
-
-
-
-
+        np.save("s_t_array.npy", s_t_array)
