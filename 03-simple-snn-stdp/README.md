@@ -1,7 +1,7 @@
-Two things:
+Concepts:
 1. Simple STDP example
-3. Take above and apply to MNIST
-2. MNIST with recurrent layers
+2. Take above and apply to MNIST
+3. MNIST with recurrent layers
 
 References:
 
