@@ -58,10 +58,6 @@ def MNIST_loaders(batch_size):
     return train_data_loader, test_data_loader, train_dataset, test_dataset
 
 
-def f_weight(x):
-    return torch.clamp(x, -1, 1.)
-
-
 # TODO: figure out why conv2d layers get error "Runtime canonicalization must
 #       simplify reduction axes to minor 4 dimensions." on mps
 if __name__ == "__main__":
@@ -74,10 +70,10 @@ if __name__ == "__main__":
     # set the output to device
     device = torch.device("cpu")
 
-    TIMESTEPS = 20
+    TIMESTEPS = 2
     lr = 0.1
     batch_size = 64
-    num_epochs = 1
+    num_epochs = 10
 
     # if this changes we need to alter network input sizes in network and out
     step_mode = "m"
@@ -99,32 +95,16 @@ if __name__ == "__main__":
     functional.set_step_mode(net, step_mode)
     net.train()
 
-    # all but last 2 layers train with stdp
-    # stdp_learners = []
-    # stdp_learners.append(
-    #     learning.STDPLearner(step_mode=step_mode, synapse=net[0], sn=net[1], tau_pre=tau_pre, tau_post=tau_post,
-    #                          f_pre=f_weight, f_post=f_weight))
-
-    # last 2 layers train with backprop
-    params_stdp = []
-    # m = list(net.modules())[0]
-    # print("stdp param: " + str(list(m.parameters())[0].shape))
-    # params_stdp.append(list(m.parameters())[0])
-    params_stdp_set = set(params_stdp)
-
     params_gradient_descent = []
     for p in net.parameters():
-        if p not in params_stdp_set:
-            print("gd param: " + str(p.shape))
-            params_gradient_descent.append(p)
+        print("gd param: " + str(p.shape))
+        params_gradient_descent.append(p)
 
     optimizer_gd = Adam(params_gradient_descent, lr=lr)
-    # optimizer_stdp = SGD(params_stdp, lr=lr, momentum=0.)
 
     train_data_loader, test_data_loader, train_dataset, test_dataset = MNIST_loaders(
         batch_size)
 
-    encoder = encoding.PoissonEncoder()
     examples = enumerate(train_data_loader)
     for epoch in range(0, num_epochs):
         print("starting training for epoch 1")
@@ -132,7 +112,6 @@ if __name__ == "__main__":
             print()
 
             functional.reset_net(net)
-            # optimizer_stdp.zero_grad()
             optimizer_gd.zero_grad()
 
             print("training for batch: ", batch_idx)
@@ -149,31 +128,16 @@ if __name__ == "__main__":
             x_dup = x_flat.repeat_interleave(TIMESTEPS, dim=0)
             # Reshape the duplicated tensor to the desired shape [TIMESTEPS, T, H*W]
             x = x_dup.view(TIMESTEPS, T, -1)
-            # x = encoder(x)
 
             # size: (TIMESTEPS, BATCH_SIZE, H*W)
             print("x: ", x.shape)
 
-            # y = []
-            # for t in range(TIMESTEPS):
-            #     # optimizer_stdp.zero_grad()
-
-            #     y.append(net(x[t]))
-
-            #     # for i in range(stdp_learners.__len__()):
-            #     #     stdp_learners[i].step(on_grad=True)
-
-            #     # optimizer_gd.zero_grad()  # TODO: try remove
-            #     # optimizer_stdp.step()
-
-            # optimizer_gd.zero_grad()  # TODO: try remove
-            # optimizer_stdp.zero_grad()
-            # y = torch.stack(y)
-
             y = functional.multi_step_forward(x, net)
+            print("y: ", y.shape)
             y = torch.mean(y, dim=0)
-            y = y.squeeze(1)
+            print("y: ", y.shape)
             y = torch.softmax(y, dim=1)
+            print("y: ", y.shape)
 
             # print("target probabilities: ", y.shape)
             print("prediction: ", str(torch.argmax(y[0], dim=0)))
@@ -187,18 +151,10 @@ if __name__ == "__main__":
             print("loss: " + str(loss))
 
             loss.backward()
-
-            # zero gradients for non sgd trained layers
-            # optimizer_stdp.zero_grad()
-
-            # for i in range(stdp_learners.__len__()):
-            #     stdp_learners[i].step(on_grad=True)
-
             optimizer_gd.step()
-            # optimizer_stdp.step()
 
             # print params to make sure they get updated between batches
-            # print("params_gradient_descent: ",
-            #       params_gradient_descent[0][0][0:5])
+            print("params_gradient_descent: ",
+                  params_gradient_descent[0][0][0:5])
 
         print("finished training for epoch 1")
