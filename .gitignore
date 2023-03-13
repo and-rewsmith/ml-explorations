@@ -14,3 +14,5 @@ logs
 
 # numpy files
 *.npy
+
+.DS_Store
