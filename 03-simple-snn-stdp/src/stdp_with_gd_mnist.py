@@ -74,7 +74,7 @@ if __name__ == "__main__":
     # set the output to device
     device = torch.device("cpu")
 
-    TIMESTEPS = 100
+    TIMESTEPS = 20
     lr = 0.1
     batch_size = 64
     num_epochs = 1
@@ -88,7 +88,7 @@ if __name__ == "__main__":
 
     # TODO: convert Conv2d layers to linear to simplify
     net = nn.Sequential(
-        layer.Conv2d(1, 16, kernel_size=3, stride=1, padding=1, bias=False),
+        layer.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False),
         neuron.IFNode(),
         layer.MaxPool2d(2, 2),
         layer.Conv2d(16, 16, kernel_size=3, stride=1, padding=1, bias=False),
@@ -142,38 +142,39 @@ if __name__ == "__main__":
             print()
 
             functional.reset_net(net)
-            optimizer_stdp.zero_grad()
+            # optimizer_stdp.zero_grad()
             optimizer_gd.zero_grad()
 
             print("training for batch: ", batch_idx)
-            x_seq = example_data.to(device)
+            x = example_data.to(device)
             example_targets = example_targets.to(device)
             targets_onehot = torch.nn.functional.one_hot(
                 example_targets).float()
 
             # convert to sensible shape:
-            # [Time, batches, channel size, height, width]
-            # = [Time, T, C, H, W]
-            x_seq = x_seq.view(x_seq.size(0), -1)
-            x_seq = torch.unsqueeze(x_seq, 0).repeat(TIMESTEPS, 1, 1)
-            x_seq = x_seq.view(TIMESTEPS, 64, 1, 28, 28)
-            x_seq = encoder(x_seq)
-
-            # at this point we have tensor of shape: [Time, T, C, H, W]
-            # we need to reshape to add channel size: [Time, T, N, C, H, W]
-            print("x input: " + str(x_seq.shape))
-            Z, T, C, H, W = x_seq.shape
+            # [Time, batches, frames, channel size, height, width]
+            # = [Time, T, N, C, H, W]
+            T, C, H, W = x.shape
             N = 1
-            x_seq = x_seq.unsqueeze(2)
-            x_seq.view(Z, T, N, C, H, W)
-            print("x reshaped: " + str(x_seq.shape))
+            C_new = 3
 
-            y = functional.multi_step_forward(x_seq, net)
+            # Duplicate the existing channel dimension C by copying it along a new dimension
+            x = x.repeat(1, C_new, 1, 1)
+
+            # Add the new dimensions N and TIMESTEPS to the tensor
+            x = x.unsqueeze(0).unsqueeze(
+                2).repeat(TIMESTEPS, 1, N, 1, 1, 1)
+
+            x = encoder(x)
+
+            y = functional.multi_step_forward(x, net)
             y = torch.mean(y, dim=0)
             y = y.squeeze(1)
             y = torch.softmax(y, dim=1)
 
             print("target probabilities: ", y.shape)
+            print("prediction: ", str(torch.argmax(y[0], dim=0)))
+            print("actual: ", str(torch.argmax(targets_onehot[0], dim=0)))
 
             loss_fn = nn.BCELoss()
             loss = loss_fn(y, targets_onehot)
