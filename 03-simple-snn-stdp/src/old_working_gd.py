@@ -135,7 +135,7 @@ if __name__ == "__main__":
         x_seq = torch.unsqueeze(x_seq, 0).repeat(T, 1, 1)
         # print("x_resize: ", x_seq.shape)
 
-        # print("x: " + str(x_seq.shape))
+        print("x: " + str(x_seq.shape))
         y = functional.multi_step_forward(x_seq, net)
         y = torch.mean(y, dim=0)
         # print("y: ", y.shape)

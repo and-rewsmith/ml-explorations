@@ -120,6 +120,7 @@ if __name__ == "__main__":
             targets_onehot = torch.nn.functional.one_hot(
                 example_targets, num_classes=10).float()
 
+            # TODO: This isnt' working due to something with x generation
             # convert to sensible shape:
             T, C, H, W = x.shape
             # Flatten the tensor along dimensions H and W
