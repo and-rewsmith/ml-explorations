@@ -111,24 +111,23 @@ if __name__ == "__main__":
         for batch_idx, (example_data, example_targets) in tqdm(enumerate(train_data_loader)):
             print()
 
+            net.zero_grad()
             functional.reset_net(net)
             optimizer_gd.zero_grad()
 
             print("training for batch: ", batch_idx)
             x = example_data.to(device)
             example_targets = example_targets.to(device)
-            targets_onehot = torch.nn.functional.one_hot(
-                example_targets, num_classes=10).float()
+            # targets_onehot = torch.nn.functional.one_hot(
+            #     example_targets, num_classes=10).float()
 
-            # TODO: This isnt' working due to something with x generation
             # convert to sensible shape:
             T, C, H, W = x.shape
-            # Flatten the tensor along dimensions H and W
             x_flat = x.view(T, C, -1)
-            # Duplicate the flattened tensor along the new dimension Z
-            x_dup = x_flat.repeat_interleave(TIMESTEPS, dim=0)
-            # Reshape the duplicated tensor to the desired shape [TIMESTEPS, T, H*W]
-            x = x_dup.view(TIMESTEPS, T, -1)
+            x_squeezed = x_flat.squeeze(1)
+            x_unsqueezed = x_squeezed.unsqueeze(1)
+            x_repeat = x_unsqueezed.repeat(1, TIMESTEPS, 1)
+            x = x_repeat.transpose(0, 1)
 
             # size: (TIMESTEPS, BATCH_SIZE, H*W)
             print("x: ", x.shape)
@@ -137,17 +136,17 @@ if __name__ == "__main__":
             print("y: ", y.shape)
             y = torch.mean(y, dim=0)
             print("y: ", y.shape)
-            y = torch.softmax(y, dim=1)
+            # y = torch.argmax(y, dim=1)
             print("y: ", y.shape)
 
             # print("target probabilities: ", y.shape)
-            print("prediction: ", str(torch.argmax(y[0], dim=0)))
-            print("actual: ", str(torch.argmax(targets_onehot[0], dim=0)))
+            print("prediction: ", str(torch.argmax(y, dim=1)[0]))
+            print("actual: ", str(example_targets[0]))
 
             loss_fn = nn.CrossEntropyLoss()
             print("y: ", y.shape)
-            print("targets: ", targets_onehot.shape)
-            loss = loss_fn(y, targets_onehot)
+            print("targets: ", example_targets.shape)
+            loss = loss_fn(y, example_targets)
 
             print("loss: " + str(loss))
 
@@ -158,4 +157,4 @@ if __name__ == "__main__":
             print("params_gradient_descent: ",
                   params_gradient_descent[0][0][0:5])
 
-        print("finished training for epoch 1")
+        print("finished training for epoch")

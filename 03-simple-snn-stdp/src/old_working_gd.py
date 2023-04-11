@@ -61,7 +61,7 @@ if __name__ == "__main__":
     # this ensures that the current current PyTorch installation was built with MPS activated.
     assert torch.backends.mps.is_built()
     # set the output to device: mps
-    device = torch.device("mps")
+    device = torch.device("cpu")
 
     epochs = 2
     lr = 0.01
@@ -127,15 +127,45 @@ if __name__ == "__main__":
         # print("example_data: " + str(example_data.shape))
         # print("example_targets: " + str(example_targets.shape))
 
-        x_seq = (example_data > 0.5).float()
-        # convert to sensible shape
-        x_seq = x_seq.view(x_seq.size(0), -1)
-        # convert to multistep
-        T = 2
-        x_seq = torch.unsqueeze(x_seq, 0).repeat(T, 1, 1)
-        # print("x_resize: ", x_seq.shape)
+        # convert to sensible shape:
+        TIMESTEPS = 1000
+        x = example_data
+        T, C, H, W = x.shape
+        x_flat = x.view(T, C, -1)
+        x_squeezed = x_flat.squeeze(1)
+        x_unsqueezed = x_squeezed.unsqueeze(1)
+        x_repeat = x_unsqueezed.repeat(1, TIMESTEPS, 1)
+        x_seq = x_repeat.transpose(0, 1)
+        print("x: ", x_seq.shape)
 
-        print("x: " + str(x_seq.shape))
+        # THIS IS BROKEN:
+        # # convert to sensible shape:
+        # print("x: ", x.shape)
+        # T, C, H, W = x.shape
+        # # Flatten the tensor along dimensions H and W
+        # x_flat = x.view(T, C, -1)
+        # print("x: ", x_flat.shape)
+        # # Duplicate the flattened tensor along the new dimension TIMESTEPS
+        # x_repeat = x_flat.repeat(TIMESTEPS, 1, 1)
+        # print("x: ", x_repeat.shape)
+        # x_seq = x_repeat
+        # x_dup = x_flat.repeat_interleave(TIMESTEPS, dim=0)
+        # # print("x: ", x_dup.shape)
+        # # # Reshape the duplicated tensor to the desired shape [TIMESTEPS, T, H*W]
+        # x_seq = x_dup.view(TIMESTEPS, T, -1)
+        # print("x: ", x_seq.shape)
+
+        # # convert to sensible shape
+        # x_seq = example_data
+        # # x_seq = (example_data > 0.5).float()
+        # print("x: ", x_seq.shape)
+        # x_seq = x_seq.view(x_seq.size(0), -1)
+        # print("x: ", x_seq.shape)
+        # # convert to multistep
+        # TIMESTEPS = 1000
+        # x_seq = torch.unsqueeze(x_seq, 0).repeat(TIMESTEPS, 1, 1)
+        # print("x: ", x_seq.shape)
+
         y = functional.multi_step_forward(x_seq, net)
         y = torch.mean(y, dim=0)
         # print("y: ", y.shape)
@@ -149,7 +179,6 @@ if __name__ == "__main__":
         print("loss: " + str(loss))
 
         loss.backward()
-        # zero gradients for non backprop trained layers
 
         optimizer_gd.step()
 
@@ -162,6 +191,7 @@ if __name__ == "__main__":
         #     print(p.shape)
         # print()
 
+        # zero gradients for non backprop trained layers
         net.zero_grad()
         optimizer_gd.zero_grad()
         functional.reset_net(net)
@@ -174,6 +204,6 @@ if __name__ == "__main__":
     print(min(losses))
     print(len(losses))
 
-    plt.show()
+    # plt.show()
 
     print("done")
