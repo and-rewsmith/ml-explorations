@@ -68,7 +68,6 @@ if __name__ == "__main__":
     # has mps
     assert torch.backends.mps.is_available()
     assert torch.backends.mps.is_built()
-    # set the output to device
     device = torch.device("mps")
 
     TIMESTEPS = 50
@@ -83,16 +82,12 @@ if __name__ == "__main__":
     tau_pre = 2.
     tau_post = 100.
 
-    # TODO: convert Conv2d layers to linear to simplify
     net = nn.Sequential(
         layer.Linear(784, 64, bias=False),
         nn.ReLU(),
-        # neuron.IFNode(),
         layer.Linear(64, 64, bias=False),
         nn.ReLU(),
-        # neuron.IFNode(),
         layer.Linear(64, 10, bias=False),
-        # neuron.IFNode(),
     ).to(device)
 
     functional.set_step_mode(net, step_mode)
@@ -110,7 +105,7 @@ if __name__ == "__main__":
 
     examples = enumerate(train_data_loader)
     for epoch in range(0, num_epochs):
-        print("starting training for epoch 1")
+        print("starting training for epoch " + str(epoch))
         for batch_idx, (example_data, example_targets) in tqdm(enumerate(train_data_loader)):
             print()
 
@@ -128,23 +123,13 @@ if __name__ == "__main__":
             x_repeat = x_unsqueezed.repeat(1, TIMESTEPS, 1)
             x = x_repeat.transpose(0, 1)
 
-            # size: (TIMESTEPS, BATCH_SIZE, H*W)
-            # print("x: ", x.shape)
-
             y = functional.multi_step_forward(x, net)
-            # print("y: ", y.shape)
             y = torch.mean(y, dim=0)
-            # print("y: ", y.shape)
-            # y = torch.argmax(y, dim=1)
-            # print("y: ", y.shape)
 
-            # print("target probabilities: ", y.shape)
             print("first prediction: ", str(torch.argmax(y, dim=1)[0]))
             print("first actual: ", str(example_targets[0]))
 
             loss_fn = nn.CrossEntropyLoss()
-            # print("y: ", y.shape)
-            # print("targets: ", example_targets.shape)
             loss = loss_fn(y, example_targets)
 
             print("loss: " + str(loss))
@@ -152,11 +137,4 @@ if __name__ == "__main__":
             loss.backward()
             optimizer_gd.step()
 
-            # print params to make sure they get updated between batches
-            # print("params_gradient_descent: ",
-            #       params_gradient_descent[0][0][0:5])
-
-            # for idx, p in enumerate(net.parameters()):
-            #     print(f"Gradient for layer {idx}: {p.grad}")
-
-        print("finished training for epoch")
+        print("finished training for epoch " + str(epoch))
