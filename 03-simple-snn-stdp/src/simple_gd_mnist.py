@@ -1,8 +1,7 @@
 """
-Implementation for MNIST with simple SNN.
+Implementation for MNIST with simple ANN.
 
-Uses hybrid approach where first layers trained through STDP and last layers
-trained with SGD.
+Serves as a foundation where we can extend this with LIF neurons from spikingjelly.
 """
 
 import torchvision
@@ -15,7 +14,7 @@ from torchvision.transforms import ToTensor, Normalize, Compose, Lambda
 
 from tqdm import tqdm
 
-from spikingjelly.activation_based import learning, layer, neuron, functional, encoding, surrogate
+from spikingjelly.activation_based import layer, functional
 
 
 def flatten(x):
@@ -23,7 +22,6 @@ def flatten(x):
 
 
 def MNIST_loaders(batch_size):
-    # TODO: integrate transform
     transform = Compose([
         ToTensor(),
         # This is well known for MNIST, so just use it.
@@ -63,8 +61,6 @@ def MNIST_loaders(batch_size):
     return train_data_loader, test_data_loader, train_dataset, test_dataset
 
 
-# TODO: figure out why conv2d layers get error "Runtime canonicalization must
-#       simplify reduction axes to minor 4 dimensions." on mps
 if __name__ == "__main__":
     torch.autograd.set_detect_anomaly(True)
 
@@ -75,7 +71,7 @@ if __name__ == "__main__":
     # set the output to device
     device = torch.device("mps")
 
-    TIMESTEPS = 1000
+    TIMESTEPS = 50
     lr = 0.01
     batch_size = 64
     num_epochs = 10
@@ -125,8 +121,6 @@ if __name__ == "__main__":
             print("training for batch: ", batch_idx)
             x = example_data.to(device)
             example_targets = example_targets.to(device)
-            # targets_onehot = torch.nn.functional.one_hot(
-            #     example_targets, num_classes=10).float()
 
             # convert to sensible shape:
             T, D = x.shape
@@ -135,22 +129,22 @@ if __name__ == "__main__":
             x = x_repeat.transpose(0, 1)
 
             # size: (TIMESTEPS, BATCH_SIZE, H*W)
-            print("x: ", x.shape)
+            # print("x: ", x.shape)
 
             y = functional.multi_step_forward(x, net)
-            print("y: ", y.shape)
+            # print("y: ", y.shape)
             y = torch.mean(y, dim=0)
-            print("y: ", y.shape)
+            # print("y: ", y.shape)
             # y = torch.argmax(y, dim=1)
-            print("y: ", y.shape)
+            # print("y: ", y.shape)
 
             # print("target probabilities: ", y.shape)
-            print("prediction: ", str(torch.argmax(y, dim=1)[0]))
-            print("actual: ", str(example_targets[0]))
+            print("first prediction: ", str(torch.argmax(y, dim=1)[0]))
+            print("first actual: ", str(example_targets[0]))
 
             loss_fn = nn.CrossEntropyLoss()
-            print("y: ", y.shape)
-            print("targets: ", example_targets.shape)
+            # print("y: ", y.shape)
+            # print("targets: ", example_targets.shape)
             loss = loss_fn(y, example_targets)
 
             print("loss: " + str(loss))
@@ -159,10 +153,10 @@ if __name__ == "__main__":
             optimizer_gd.step()
 
             # print params to make sure they get updated between batches
-            print("params_gradient_descent: ",
-                  params_gradient_descent[0][0][0:5])
+            # print("params_gradient_descent: ",
+            #       params_gradient_descent[0][0][0:5])
 
-            for idx, p in enumerate(net.parameters()):
-                print(f"Gradient for layer {idx}: {p.grad}")
+            # for idx, p in enumerate(net.parameters()):
+            #     print(f"Gradient for layer {idx}: {p.grad}")
 
         print("finished training for epoch")
