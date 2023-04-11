@@ -11,30 +11,35 @@ import torch
 import torch.nn as nn
 from torch.optim import SGD, Adam
 import torch.utils.data as data
+from torchvision.transforms import ToTensor, Normalize, Compose, Lambda
 
 from tqdm import tqdm
 
 from spikingjelly.activation_based import learning, layer, neuron, functional, encoding, surrogate
 
 
+def flatten(x):
+    return torch.flatten(x)
+
+
 def MNIST_loaders(batch_size):
     # TODO: integrate transform
-    # transform = Compose([
-    #     ToTensor(),
-    #     # This is well known for MNIST, so just use it.
-    #     Normalize((0.1307,), (0.3081,)),
-    #     Lambda(lambda x: torch.flatten(x))])
+    transform = Compose([
+        ToTensor(),
+        # This is well known for MNIST, so just use it.
+        Normalize((0.1307,), (0.3081,)),
+        Lambda(flatten)])
 
     train_dataset = torchvision.datasets.MNIST(
         root="./data",
         train=True,
-        transform=torchvision.transforms.ToTensor(),
+        transform=transform,
         download=True,
     )
     test_dataset = torchvision.datasets.MNIST(
         root="./data",
         train=False,
-        transform=torchvision.transforms.ToTensor(),
+        transform=transform,
         download=True
     )
 
@@ -68,10 +73,10 @@ if __name__ == "__main__":
     assert torch.backends.mps.is_available()
     assert torch.backends.mps.is_built()
     # set the output to device
-    device = torch.device("cpu")
+    device = torch.device("mps")
 
-    TIMESTEPS = 2
-    lr = 0.1
+    TIMESTEPS = 1000
+    lr = 0.01
     batch_size = 64
     num_epochs = 10
 
@@ -85,8 +90,10 @@ if __name__ == "__main__":
     # TODO: convert Conv2d layers to linear to simplify
     net = nn.Sequential(
         layer.Linear(784, 64, bias=False),
+        nn.ReLU(),
         # neuron.IFNode(),
         layer.Linear(64, 64, bias=False),
+        nn.ReLU(),
         # neuron.IFNode(),
         layer.Linear(64, 10, bias=False),
         # neuron.IFNode(),
@@ -122,10 +129,8 @@ if __name__ == "__main__":
             #     example_targets, num_classes=10).float()
 
             # convert to sensible shape:
-            T, C, H, W = x.shape
-            x_flat = x.view(T, C, -1)
-            x_squeezed = x_flat.squeeze(1)
-            x_unsqueezed = x_squeezed.unsqueeze(1)
+            T, D = x.shape
+            x_unsqueezed = x.unsqueeze(1)
             x_repeat = x_unsqueezed.repeat(1, TIMESTEPS, 1)
             x = x_repeat.transpose(0, 1)
 
@@ -156,5 +161,8 @@ if __name__ == "__main__":
             # print params to make sure they get updated between batches
             print("params_gradient_descent: ",
                   params_gradient_descent[0][0][0:5])
+
+            for idx, p in enumerate(net.parameters()):
+                print(f"Gradient for layer {idx}: {p.grad}")
 
         print("finished training for epoch")
