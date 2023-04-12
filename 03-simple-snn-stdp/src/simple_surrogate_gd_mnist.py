@@ -1,20 +1,21 @@
 """
-Implementation for MNIST with simple ANN.
+Implementation for MNIST with simple ANN and surrogage gradients for LIF nodes.
 
-Serves as a foundation where we can extend this with LIF neurons from spikingjelly.
+Serves as a foundation where we can extend this with unsupervised STDP training.
 """
 
 import torchvision
 
 import torch
 import torch.nn as nn
-from torch.optim import SGD, Adam
+from torch.optim import Adam
 import torch.utils.data as data
 from torchvision.transforms import ToTensor, Normalize, Compose, Lambda
+import torch.nn.functional as F
 
 from tqdm import tqdm
 
-from spikingjelly.activation_based import layer, functional
+from spikingjelly.activation_based import layer, functional, neuron, surrogate, encoding
 
 
 def flatten(x):
@@ -61,6 +62,12 @@ def MNIST_loaders(batch_size):
     return train_data_loader, test_data_loader, train_dataset, test_dataset
 
 
+"""
+TODO:
+- implement surrogate gradient
+- encoder
+
+"""
 if __name__ == "__main__":
     torch.autograd.set_detect_anomaly(True)
 
@@ -68,22 +75,25 @@ if __name__ == "__main__":
     # has mps
     assert torch.backends.mps.is_available()
     assert torch.backends.mps.is_built()
-    device = torch.device("mps")
+    device = torch.device("cpu")
 
-    TIMESTEPS = 50
+    TIMESTEPS = 100
     lr = 0.01
     batch_size = 64
-    num_epochs = 10
+    num_epochs = 1
 
     # if this changes we need to alter network input sizes in network and out
     step_mode = "m"
 
+    tau = 2.
+
     net = nn.Sequential(
-        layer.Linear(784, 64, bias=False),
-        nn.ReLU(),
-        layer.Linear(64, 64, bias=False),
-        nn.ReLU(),
+        layer.Linear(784, 10, bias=False),
+        neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan()),
+        layer.Linear(10, 64, bias=False),
+        neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan()),
         layer.Linear(64, 10, bias=False),
+        neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan()),
     ).to(device)
 
     functional.set_step_mode(net, step_mode)
@@ -99,6 +109,8 @@ if __name__ == "__main__":
     train_data_loader, test_data_loader, train_dataset, test_dataset = MNIST_loaders(
         batch_size)
 
+    encoder = encoding.PoissonEncoder()
+
     examples = enumerate(train_data_loader)
     for epoch in range(0, num_epochs):
         print("starting training for epoch " + str(epoch))
@@ -112,6 +124,10 @@ if __name__ == "__main__":
             print("training for batch: ", batch_idx)
             x = example_data.to(device)
             example_targets = example_targets.to(device)
+            targets_onehot = torch.nn.functional.one_hot(
+                example_targets, num_classes=10).float()
+
+            x = encoder(x)
 
             # convert to sensible shape:
             T, D = x.shape
@@ -122,15 +138,27 @@ if __name__ == "__main__":
             y = functional.multi_step_forward(x, net)
             y = torch.mean(y, dim=0)
 
+            print("y: " + str(y))
+
             print("first prediction: ", str(torch.argmax(y, dim=1)[0]))
             print("first actual: ", str(example_targets[0]))
 
-            loss_fn = nn.CrossEntropyLoss()
-            loss = loss_fn(y, example_targets)
+            # loss_fn = nn.CrossEntropyLoss()
+            # loss = loss_fn(y, example_targets)
+
+            loss = F.mse_loss(y, targets_onehot).float()
 
             print("loss: " + str(loss))
 
             loss.backward()
             optimizer_gd.step()
+
+            # print params to make sure they get updated between batches
+            print("params_gradient_descent: ",
+                  params_gradient_descent[0][0][0:5])
+
+            for idx, p in enumerate(net.parameters()):
+                for row in p.grad:
+                    print(f"Gradient for layer {idx}: {row}")
 
         print("finished training for epoch " + str(epoch))
