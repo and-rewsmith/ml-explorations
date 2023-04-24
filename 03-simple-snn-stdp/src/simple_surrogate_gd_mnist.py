@@ -4,6 +4,10 @@ Implementation for MNIST with simple ANN and surrogage gradients for LIF nodes.
 Serves as a foundation where we can extend this with unsupervised STDP training.
 """
 
+# TODO: 4-23
+# figure out why this network is not learning at all(loss not decreasing)
+# there are some commented out lines that print some context
+
 import torchvision
 
 import torch
@@ -88,11 +92,14 @@ if __name__ == "__main__":
     tau = 2.
 
     net = nn.Sequential(
-        layer.Linear(784, 10, bias=False),
+        layer.Linear(784, 64, bias=False),
+        nn.BatchNorm1d(64),
         neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan()),
-        layer.Linear(10, 64, bias=False),
+        layer.Linear(64, 64, bias=False),
+        nn.BatchNorm1d(64),
         neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan()),
         layer.Linear(64, 10, bias=False),
+        nn.BatchNorm1d(10),
         neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan()),
     ).to(device)
 
@@ -138,7 +145,7 @@ if __name__ == "__main__":
             y = functional.multi_step_forward(x, net)
             y = torch.mean(y, dim=0)
 
-            print("y: " + str(y))
+            # print("y: " + str(y))
 
             print("first prediction: ", str(torch.argmax(y, dim=1)[0]))
             print("first actual: ", str(example_targets[0]))
@@ -154,11 +161,11 @@ if __name__ == "__main__":
             optimizer_gd.step()
 
             # print params to make sure they get updated between batches
-            print("params_gradient_descent: ",
-                  params_gradient_descent[0][0][0:5])
+            # print("params_gradient_descent: ",
+            #       params_gradient_descent[0][0][0:5])
 
-            for idx, p in enumerate(net.parameters()):
-                for row in p.grad:
-                    print(f"Gradient for layer {idx}: {row}")
+            # for idx, p in enumerate(net.parameters()):
+            #     for row in p.grad:
+            #         print(f"Gradient for layer {idx}: {row}")
 
         print("finished training for epoch " + str(epoch))
