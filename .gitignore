@@ -17,4 +17,6 @@ logs
 
 *.txt
 
+.vscode
+
 .DS_Store
