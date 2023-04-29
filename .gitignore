@@ -20,3 +20,8 @@ logs
 .vscode
 
 .DS_Store
+
+log.*
+*.log
+
+tmp.*

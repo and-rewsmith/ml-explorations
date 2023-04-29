@@ -8,9 +8,10 @@ from torch.optim import Adam
 from tqdm import tqdm
 import logging
 
+# logging.basicConfig(filename="log.log", level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-ITERATIONS = 20
+ITERATIONS = 50 
 
 def MNIST_loaders(train_batch_size=50000, test_batch_size=10000):
     transform = Compose([
@@ -62,8 +63,6 @@ class RecurrentFFNet(nn.Module):
             [nn.LayerNorm(size) for size in hidden_sizes])
 
     # TODO: implement side connections as shown in Fig3
-    # TODO: Big problem with gradients. This isn't behaving like a layer independent training, because the gradients flow to model parameters in other layers via prev_activations
-    #       Can this be solved by detaching prev_act?
     # TODO: will cloning weights mess up model?
     def forward_timestep(self, input_image, prev_activations, one_hot_labels):
         for i in range(0, len(prev_activations)):
@@ -273,7 +272,7 @@ if __name__ == "__main__":
     model = RecurrentFFNet(784, [500, 250, 100], 10).to(device)
     # TODO: decrease learning rate
     optimizer = Adam(model.parameters())
-    num_epochs = 10
+    num_epochs = 75
 
     for epoch in range(num_epochs):
         logging.info(f'Training starting...')
