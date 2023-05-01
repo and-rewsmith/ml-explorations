@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from torch.optim import Adam
 from tqdm import tqdm
 import logging
+import torchviz
 
 # logging.basicConfig(filename="log.log", level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.basicConfig(level=logging.INFO,
@@ -224,6 +225,10 @@ def train(model, positive_images, positive_labels, negative_images, negative_lab
             ]))).mean()
             layer_losses_sum += layer_loss.item()
 
+            torchviz.make_dot(layer_loss, params=dict(model.named_parameters())).render("attached", format="png")
+            input()
+
+
             layer_loss.backward()
 
             # TODO: something strange is going on with grad
@@ -327,7 +332,7 @@ if __name__ == "__main__":
 
     train_loader, test_loader = MNIST_loaders()
 
-    model = RecurrentFFNet(784, [500], 10).to(device)
+    model = RecurrentFFNet(784, [500, 250], 10).to(device)
     # TODO: decrease learning rate
     optimizer = Adam(model.parameters())
     num_epochs = 200
