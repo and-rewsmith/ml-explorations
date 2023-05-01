@@ -93,22 +93,42 @@ class RecurrentFFNet(nn.Module):
             for i, (prev_act, layer) in enumerate(zip(prev_activations, self.layers[:-1])):
                 # first layer gets the input image
                 if i == 0:
-                    new_act = F.linear(input_image, layer.weight) + F.linear(
-                        prev_norm_act[i + 1], self.layers[i+1].weight.t())
+                    # print("------, ", i)
+                    # print("first weights")
+                    # print(input_image.shape)
+                    # print(layer.weight.shape)
+
+                    # print("second")
+                    # print(prev_norm_act[i + 1].shape)
+                    # print(self.layers[i+1].weight.t().shape)
+
+                    new_activations.append(F.linear(input_image, layer.weight) + F.linear(
+                        prev_norm_act[i + 1], self.layers[i+1].weight.t()))
                 # last hidden layer gets the previous layer's activation and the one-hot labels
                 elif i == len(prev_activations) - 1:
-                    new_act = F.linear(prev_norm_act[i - 1], layer.weight.clone()) + F.linear(
-                        one_hot_labels, output_layer_weights)
+                    # print("------, ", i)
+                    # print("first weights")
+                    # print(prev_norm_act[i - 1].shape)
+                    # print(layer.weight.shape)
+                    # F.linear(prev_norm_act[i - 1], layer.weight)
+
+                    # print("second")
+                    # print(one_hot_labels.shape)
+                    # print(output_layer_weights.shape)
+                    # F.linear(one_hot_labels, output_layer_weights)
+
+                    new_activations.append(F.linear(prev_norm_act[i - 1], layer.weight) + F.linear(
+                        one_hot_labels, output_layer_weights))
                 # other layers get activations from the layers above and below
                 else:
-                    new_act = F.linear(prev_norm_act[i - 1], layer.weight.clone()) + F.linear(
-                        prev_norm_act[i + 1], self.layers[i+1].weight.t())
+                    new_activations.append(F.linear(prev_norm_act[i - 1], layer.weight) + F.linear(
+                        prev_norm_act[i + 1], self.layers[i+1].weight.t()))
 
                 if should_damp:
-                    new_act = (1 - self.damping_factor) * prev_act + \
-                        self.damping_factor * new_act
+                    new_activations[i] = (1 - self.damping_factor) * prev_act + \
+                        self.damping_factor * new_activations[i]
 
-                new_activations.append(F.relu(new_act))
+                new_activations[i] = F.relu(new_activations[i])
 
         # print("new activations")
         # print(new_activations)
@@ -299,7 +319,7 @@ if __name__ == "__main__":
     # this ensures that the current current PyTorch installation was built with MPS activated.
     assert (torch.backends.mps.is_built())
     # set the output to device: mps
-    device = torch.device("mps")
+    device = torch.device("cpu")
 
     torch.autograd.set_detect_anomaly(True)
 
