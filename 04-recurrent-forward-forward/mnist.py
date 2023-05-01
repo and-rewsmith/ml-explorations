@@ -120,7 +120,9 @@ class Layer(nn.Linear):
 
     def train(self, x_pos, x_neg):
         for i in tqdm(range(self.num_epochs)):
-            g_pos = self.forward(x_pos).pow(2).mean(1)
+            g_pos = self.forward(x_pos).pow(2)
+            g_pos = g_pos.mean(1)
+            print('g_pos', g_pos.shape)
             g_neg = self.forward(x_neg).pow(2).mean(1)
             # The following loss pushes pos (neg) samples to
             # values larger (smaller) than the self.threshold.
@@ -142,7 +144,7 @@ def visualize_sample(data, name='', idx=0):
     plt.title(name)
     # plt.imshow(reshaped, cmap="gray")
     # plt.show()
-    plt.savefig("results/" + name + '.png')
+    # plt.savefig("results/" + name + '.png')
 
 
 if __name__ == "__main__":
