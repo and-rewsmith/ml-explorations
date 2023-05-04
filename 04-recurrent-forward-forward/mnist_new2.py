@@ -14,6 +14,7 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 ITERATIONS = 10
+THRESHOLD = 2
 
 
 def MNIST_loaders(train_batch_size=50000, test_batch_size=10000):
@@ -57,41 +58,119 @@ class RecurrentFFNet(nn.Module):
         # self.layer_norms = nn.ModuleList(
         #     [nn.LayerNorm(size) for size in hidden_sizes])
 
+    def forward_timestep_test(self, input, prev_activations, labels, should_damp=True):
+        prev_activations_norm = []
+        for i in range(0, len(prev_activations)):
+            prev_activations[i] = prev_activations[i].detach()
+
+            if torch.all(prev_activations[i] == 0):
+                prev_activations_norm.append(prev_activations[i])
+                continue
+
+            norm = prev_activations[i].norm(p=2, dim=1, keepdim=True)
+            prev_activations_norm.append(prev_activations[i].div(norm))
+
+        new_activations = []
+        output_layer_weights = self.layers[-1].weight.t()
+        if len(prev_activations) == 1:
+            pos_new_act = F.linear(
+                labels, output_layer_weights) + F.linear(input, self.layers[0].weight)
+            if should_damp:
+                # TODO: add note
+                pos_new_act = (1 - self.damping_factor) * prev_activations[0] + \
+                    self.damping_factor * pos_new_act
+            new_activations.append(F.relu(pos_new_act))
+        else:
+            for i, (prev_act, prev_act_norm, layer) in enumerate(zip(prev_activations, prev_activations_norm, self.layers[:-1])):
+                if i == 0:
+                    new_activations.append(F.linear(input, layer.weight) + F.linear(
+                        prev_activations_norm[i + 1], self.layers[i+1].weight.t()))
+                elif i == len(prev_activations) - 1:
+                    new_activations.append(F.linear(prev_activations_norm[i - 1], layer.weight) + F.linear(
+                        labels, output_layer_weights))
+                else:
+                    new_activations.append(F.linear(prev_act_norm[i - 1], layer.weight) + F.linear(
+                        prev_act_norm[i + 1], self.layers[i+1].weight.t()))
+
+                if should_damp:
+                    new_activations[i] = (1 - self.damping_factor) * prev_act + \
+                        self.damping_factor * new_activations[i]
+
+                new_activations[i] = F.relu(new_activations[i])
+
+        return new_activations
+
     # TODO: implement side connections as shown in Fig3
     # TODO: will cloning weights mess up model?
     # TODO: implement forward pass with no training for initial timesteps
     # TODO: should_damp with false to init model layers will suffer from undamped changes in previously activated layers
-    def forward_timestep(self, input_image, prev_activations, one_hot_labels, should_damp=True):
-        for i in range(0, len(prev_activations)):
-            prev_activations[i] = prev_activations[i].detach()
+    def forward_timestep_train(self, pos_input, pos_prev_activations, pos_labels, neg_input, neg_prev_activations, neg_labels, optimizer, should_train_and_damp=True):
+        pos_prev_activations_norm = []
+        for i in range(0, len(pos_prev_activations)):
+            pos_prev_activations[i] = pos_prev_activations[i].detach()
 
-        # print("prev activations")
-        # print(prev_activations)
-
-        # prev_norm_act = prev_activations
-
-        prev_norm_act = []
-        for prev_act in prev_activations:
-            if torch.all(prev_act == 0):
-                prev_norm_act.append(prev_act)
+            if torch.all(pos_prev_activations[i] == 0):
+                pos_prev_activations_norm.append(pos_prev_activations[i])
                 continue
 
-            norm = prev_act.norm(p=2, dim=1, keepdim=True)
-            prev_norm_act.append(prev_act.div(norm))
+            norm = pos_prev_activations[i].norm(p=2, dim=1, keepdim=True)
+            pos_prev_activations_norm.append(pos_prev_activations[i].div(norm))
 
-        # print("debug")
-        # print(prev_norm_act)
+        neg_prev_activations_norm = []
+        for i in range(0, len(neg_prev_activations)):
+            neg_prev_activations[i] = neg_prev_activations[i].detach()
 
+            if torch.all(neg_prev_activations[i] == 0):
+                neg_prev_activations_norm.append(neg_prev_activations[i])
+                continue
+
+            norm = neg_prev_activations[i].norm(p=2, dim=1, keepdim=True)
+            neg_prev_activations_norm.append(neg_prev_activations[i].div(norm))
+
+        # TODO: be real careful with this as we don't want it to be cloned
         output_layer_weights = self.layers[-1].weight.t()
-        new_activations = []
-        if len(prev_activations) == 1:
-            new_act = F.linear(
-                one_hot_labels, output_layer_weights) + F.linear(input_image, self.layers[0].weight)
-            new_act = (1 - self.damping_factor) * prev_activations[0] + \
-                self.damping_factor * new_act
-            new_activations.append(F.relu(new_act))
+        pos_new_activations = []
+        neg_new_activations = []
+        layer_losses = []
+        # TODO: check needs cleanup
+        if len(pos_prev_activations_norm) == 1:
+            optimizer.zero_grad()
+            pos_new_act = F.linear(
+                pos_labels, output_layer_weights) + F.linear(pos_input, self.layers[0].weight)
+            if should_train_and_damp:
+                # TODO: add note
+                pos_new_act = (1 - self.damping_factor) * pos_prev_activations[0] + \
+                    self.damping_factor * pos_new_act
+            pos_new_activations.append(F.relu(pos_new_act))
+
+            neg_new_act = F.linear(
+                neg_labels, output_layer_weights) + F.linear(neg_input, self.layers[0].weight)
+            # TODO: this wasn't tested with single layer bench, so need to test again
+            if should_train_and_damp:
+                # TODO: add note
+                neg_new_act = (1 - self.damping_factor) * neg_prev_activations[0] + \
+                    self.damping_factor * neg_new_act
+            neg_new_activations.append(F.relu(neg_new_act))
+
+            if should_train_and_damp:
+                # print(pos_new_activations[0])
+                pos_goodness = layer_activations_to_goodness(
+                    pos_new_activations[0])
+                neg_goodness = layer_activations_to_goodness(
+                    neg_new_activations[0])
+                layer_loss = torch.log(1 + torch.exp(torch.cat([
+                    (-1 * pos_goodness) + THRESHOLD,
+                    neg_goodness - THRESHOLD
+                ]))).mean()
+                layer_losses.append(layer_loss)
+                layer_loss.backward()
+                torchviz.make_dot(layer_loss, params=dict(
+                    model.named_parameters())).render("graph", format="png")
+                optimizer.step()
+
         else:
-            for i, (prev_act, layer) in enumerate(zip(prev_activations, self.layers[:-1])):
+            for i, (pos_prev_act, neg_prev_act, pos_prev_act_norm, neg_prev_act_norm, layer) in enumerate(zip(pos_prev_activations, neg_prev_activations, pos_prev_activations_norm, neg_prev_activations_norm, self.layers[:-1])):
+                optimizer.zero_grad()
                 # first layer gets the input image
                 if i == 0:
                     # print("------, ", i)
@@ -103,10 +182,14 @@ class RecurrentFFNet(nn.Module):
                     # print(prev_norm_act[i + 1].shape)
                     # print(self.layers[i+1].weight.t().shape)
 
-                    new_activations.append(F.linear(input_image, layer.weight) + F.linear(
-                        prev_norm_act[i + 1], self.layers[i+1].weight.t()))
+                    pos_new_activations.append(F.linear(pos_input, layer.weight) + F.linear(
+                        pos_prev_activations_norm[i + 1], self.layers[i+1].weight.t()))
+
+                    neg_new_activations.append(F.linear(neg_input, layer.weight) + F.linear(
+                        neg_prev_activations_norm[i + 1], self.layers[i+1].weight.t()))
                 # last hidden layer gets the previous layer's activation and the one-hot labels
-                elif i == len(prev_activations) - 1:
+                # TODO: check needs to be refactored
+                elif i == len(pos_prev_activations) - 1:
                     # print("------, ", i)
                     # print("first weights")
                     # print(prev_norm_act[i - 1].shape)
@@ -118,23 +201,52 @@ class RecurrentFFNet(nn.Module):
                     # print(output_layer_weights.shape)
                     # F.linear(one_hot_labels, output_layer_weights)
 
-                    new_activations.append(F.linear(prev_norm_act[i - 1], layer.weight) + F.linear(
-                        one_hot_labels, output_layer_weights))
+                    pos_new_activations.append(F.linear(pos_prev_activations_norm[i - 1], layer.weight) + F.linear(
+                        pos_labels, output_layer_weights))
+                    neg_new_activations.append(F.linear(neg_prev_activations_norm[i - 1], layer.weight) + F.linear(
+                        neg_labels, output_layer_weights))
                 # other layers get activations from the layers above and below
                 else:
-                    new_activations.append(F.linear(prev_norm_act[i - 1], layer.weight) + F.linear(
-                        prev_norm_act[i + 1], self.layers[i+1].weight.t()))
+                    pos_new_activations.append(F.linear(pos_prev_act_norm[i - 1], layer.weight) + F.linear(
+                        pos_prev_act_norm[i + 1], self.layers[i+1].weight.t()))
+                    neg_new_activations.append(F.linear(neg_prev_act_norm[i - 1], layer.weight) + F.linear(
+                        neg_prev_act_norm[i + 1], self.layers[i+1].weight.t()))
 
-                if should_damp:
-                    new_activations[i] = (1 - self.damping_factor) * prev_act + \
-                        self.damping_factor * new_activations[i]
+                if should_train_and_damp:
+                    pos_new_activations[i] = (1 - self.damping_factor) * pos_prev_act + \
+                        self.damping_factor * pos_new_activations[i]
+                    neg_new_activations[i] = (1 - self.damping_factor) * neg_prev_act + \
+                        self.damping_factor * neg_new_activations[i]
 
-                new_activations[i] = F.relu(new_activations[i])
+                pos_new_activations[i] = F.relu(pos_new_activations[i])
+                neg_new_activations[i] = F.relu(neg_new_activations[i])
 
-        # print("new activations")
-        # print(new_activations)
+                if should_train_and_damp:
+                    pos_goodness = layer_activations_to_goodness(
+                        pos_new_activations[i])
+                    neg_goodness = layer_activations_to_goodness(
+                        neg_new_activations[i])
 
-        return new_activations
+                    layer_loss = torch.log(1 + torch.exp(torch.cat([
+                        (-1 * pos_goodness) + THRESHOLD,
+                        neg_goodness - THRESHOLD
+                    ]))).mean()
+                    layer_losses.append(layer_loss)
+                    layer_loss.backward()
+                    optimizer.step()
+
+        return pos_new_activations, neg_new_activations, layer_losses
+
+
+def layer_activations_to_goodness(layer_activations):
+    goodness_for_layer = torch.mean(
+        torch.square(layer_activations), dim=1).requires_grad_()
+    # print("goodness for layer shape")
+    # print(goodness_for_layer)
+
+    # print("goodness")
+    # print(goodness)
+    return goodness_for_layer
 
 
 def activations_to_goodness(activations):
@@ -174,88 +286,34 @@ def train(model, positive_images, positive_labels, negative_images, negative_lab
     negative_activations = [torch.zeros(
         negative_images.shape[0], layer.out_features, device=device) for layer in model.layers[:-1]]
 
-    # with no grad
     with torch.no_grad():
         for iteration in range(0, len(model.layers[:-1])):
-            positive_activations = model.forward_timestep(
-                positive_images, positive_activations, positive_one_hot_labels, False)
-
-            negative_activations = model.forward_timestep(
-                negative_images, negative_activations, negative_one_hot_labels, False)
+            positive_activations, negative_activations, _layer_losses = model.forward_timestep_train(
+                positive_images, positive_activations, positive_one_hot_labels, negative_images, negative_activations, negative_one_hot_labels, optimizer, False)
 
         # perform multiple iterations of the recurrent forward pass
     running_loss = 0
     for iteration in range(ITERATIONS):
         # print(torch.mps.current_allocated_memory() / (10 ** 9))
 
-        # calculate positive goodness
-        positive_activations = model.forward_timestep(
-            positive_images, positive_activations, positive_one_hot_labels)
-        # print("activations shape")
-        # for act in positive_activations:
-        #     print(act.shape)
+        positive_activations, negative_activations, layer_losses = model.forward_timestep_train(
+            positive_images, positive_activations, positive_one_hot_labels, negative_images, negative_activations, negative_one_hot_labels, optimizer, True)
+
         positive_goodness = activations_to_goodness(positive_activations)
+        negative_goodness = activations_to_goodness(negative_activations)
+
         # print("goodness shape")
         # print(positive_goodness.shape)
-        print("positive goodness")
-        print(positive_goodness)
+        # print("positive goodness")
+        # print(positive_goodness)
 
         # calculate negative goodness
-        negative_activations = model.forward_timestep(
-            negative_images, negative_activations, negative_one_hot_labels)
-        negative_goodness = activations_to_goodness(negative_activations)
-        print("negative goodness")
-        print(negative_goodness)
+        # print("negative goodness")
+        # print(negative_goodness)
 
-        # train each layer independently
-        layer_losses_len = len(model.layers[:-1])
-        layer_losses_sum = 0
-        for i, (pos_good, neg_good, _layer) in tqdm(enumerate(zip(positive_goodness, negative_goodness, model.layers[:-1]))):
-            optimizer.zero_grad()
-            layer_loss = 0
-
-            # pos_good = pos_good.item()
-            # neg_good = neg_good.item()
-            # print("----------- ", pos_good.grad)
-
-            # todo: consider simplifying loss function
-            layer_loss = torch.log(1 + torch.exp(torch.cat([
-                (-1 * pos_good) + threshold,
-                neg_good - threshold
-            ]))).mean()
-            layer_losses_sum += layer_loss.item()
-
-            torchviz.make_dot(layer_loss, params=dict(model.named_parameters())).render("attached", format="png")
-            input()
-
-
-            layer_loss.backward()
-
-            # TODO: something strange is going on with grad
-            # tcount = 0
-            # for name, param in model.named_parameters():
-            #     if param.requires_grad:
-            #         print(name, param.data)
-            #         # print(name, param.grad)
-            #         tcount += 1
-            #     if tcount == 1:
-            #         break
-            # input()
-
-            optimizer.step()
-            optimizer.zero_grad()
-
-            for i in range(0, len(positive_activations)):
-                positive_activations[i] = positive_activations[i].detach()
-
-            for i in range(0, len(negative_activations)):
-                negative_activations[i] = negative_activations[i].detach()
-
-        average_layer_loss = layer_losses_sum/layer_losses_len
-        running_loss += average_layer_loss
         # print(torch.mps.current_allocated_memory() / (10 ** 9))
         logging.info(
-            f'iteration {iteration+1}, average layer loss: {average_layer_loss}')
+            f'iteration {iteration+1}, average layer loss: {sum(layer_losses) / len(layer_losses)}')
 
     return running_loss / ITERATIONS
 
@@ -280,11 +338,11 @@ def test(model, data_loader, device):
                     images.shape[0], layer.out_features, device=device) for layer in model.layers[:-1]]
 
                 for iteration in range(0, len(model.layers[:-1])):
-                    activations = model.forward_timestep(
+                    activations = model.forward_timestep_test(
                         images, activations, one_hot_labels, False)
 
                 for _ in range(ITERATIONS):
-                    activations = model.forward_timestep(
+                    activations = model.forward_timestep_test(
                         images, activations, one_hot_labels)
 
                 goodness = activations_to_goodness(activations)
@@ -324,7 +382,7 @@ if __name__ == "__main__":
     # this ensures that the current current PyTorch installation was built with MPS activated.
     assert (torch.backends.mps.is_built())
     # set the output to device: mps
-    device = torch.device("cpu")
+    device = torch.device("mps")
 
     torch.autograd.set_detect_anomaly(True)
 
