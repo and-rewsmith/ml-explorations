@@ -13,8 +13,15 @@ import torchviz
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
+# QUESTIONS:
+# 1 - Why does lowering threshold allow it to work?
+# 2 - Layers are swapping between all high gooness predictions
+#     Investigate layer activations?
+#      Is there some bug?
+#     Is model struggling to optimize parameter for multiple local layer trainings?
 ITERATIONS = 10
-THRESHOLD = 2
+THRESHOLD = .25
+LEARNING_RATE = 0.0001
 
 
 def MNIST_loaders(train_batch_size=50000, test_batch_size=10000):
@@ -101,9 +108,6 @@ class RecurrentFFNet(nn.Module):
         return new_activations
 
     # TODO: implement side connections as shown in Fig3
-    # TODO: will cloning weights mess up model?
-    # TODO: implement forward pass with no training for initial timesteps
-    # TODO: should_damp with false to init model layers will suffer from undamped changes in previously activated layers
     def forward_timestep_train(self, pos_input, pos_prev_activations, pos_labels, neg_input, neg_prev_activations, neg_labels, optimizer, should_train_and_damp=True):
         pos_prev_activations_norm = []
         for i in range(0, len(pos_prev_activations)):
@@ -127,7 +131,6 @@ class RecurrentFFNet(nn.Module):
             norm = neg_prev_activations[i].norm(p=2, dim=1, keepdim=True)
             neg_prev_activations_norm.append(neg_prev_activations[i].div(norm))
 
-        # TODO: be real careful with this as we don't want it to be cloned
         output_layer_weights = self.layers[-1].weight.t()
         pos_new_activations = []
         neg_new_activations = []
@@ -158,14 +161,18 @@ class RecurrentFFNet(nn.Module):
                     pos_new_activations[0])
                 neg_goodness = layer_activations_to_goodness(
                     neg_new_activations[0])
+
+                print("LAYER 0 positive goodness: ", pos_goodness)
+                print("LAYER 0 negative goodness: ", neg_goodness)
+
                 layer_loss = torch.log(1 + torch.exp(torch.cat([
                     (-1 * pos_goodness) + THRESHOLD,
                     neg_goodness - THRESHOLD
                 ]))).mean()
                 layer_losses.append(layer_loss)
                 layer_loss.backward()
-                torchviz.make_dot(layer_loss, params=dict(
-                    model.named_parameters())).render("graph", format="png")
+                # torchviz.make_dot(layer_loss, params=dict(
+                #     model.named_parameters())).render("graph", format="png")
                 optimizer.step()
 
         else:
@@ -227,12 +234,18 @@ class RecurrentFFNet(nn.Module):
                     neg_goodness = layer_activations_to_goodness(
                         neg_new_activations[i])
 
+                    print("LAYER " + str(i) + " positive goodness: " + str(pos_goodness))
+                    print("LAYER " + str(i) + " negative goodness: " + str(neg_goodness))
+
                     layer_loss = torch.log(1 + torch.exp(torch.cat([
                         (-1 * pos_goodness) + THRESHOLD,
                         neg_goodness - THRESHOLD
                     ]))).mean()
                     layer_losses.append(layer_loss)
                     layer_loss.backward()
+                    # torchviz.make_dot(layer_loss, params=dict(
+                    #     model.named_parameters())).render("graph", format="png")
+                    # input()
                     optimizer.step()
 
         return pos_new_activations, neg_new_activations, layer_losses
@@ -266,7 +279,7 @@ def activations_to_goodness(activations):
 # todo: consider adding a way to ignore layer training if activations haven't reached during start of timestep processing
 
 
-def train(model, positive_images, positive_labels, negative_images, negative_labels, optimizer, device, threshold=2):
+def train(model, positive_images, positive_labels, negative_images, negative_labels, optimizer, device):
     model.train()
 
     # prepare positive one-hot encoded labels
@@ -298,6 +311,8 @@ def train(model, positive_images, positive_labels, negative_images, negative_lab
 
         positive_activations, negative_activations, layer_losses = model.forward_timestep_train(
             positive_images, positive_activations, positive_one_hot_labels, negative_images, negative_activations, negative_one_hot_labels, optimizer, True)
+
+        # print("layer losses: ------- ", layer_losses)
 
         positive_goodness = activations_to_goodness(positive_activations)
         negative_goodness = activations_to_goodness(negative_activations)
@@ -392,7 +407,7 @@ if __name__ == "__main__":
 
     model = RecurrentFFNet(784, [500, 250], 10).to(device)
     # TODO: decrease learning rate
-    optimizer = Adam(model.parameters())
+    optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
     num_epochs = 200
 
     for epoch in range(num_epochs):
