@@ -19,6 +19,11 @@ logging.basicConfig(level=logging.INFO,
 #     Investigate layer activations?
 #      Is there some bug?
 #     Is model struggling to optimize parameter for multiple local layer trainings?
+# TODO:
+# 1 - Implement side connections as shown in Fig3
+# 2 - Implement layer local training
+#     - we can reference the pytorch ff example for this, also (https://github.com/cozheyuanzhangde/Forward-Forward/blob/main/model.py)
+# 3 - Implement dedicated recurrent weights
 ITERATIONS = 10
 THRESHOLD = .25
 LEARNING_RATE = 0.0001
