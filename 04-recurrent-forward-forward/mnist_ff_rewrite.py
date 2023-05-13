@@ -88,19 +88,42 @@ class RecurrentFFNet(nn.Module):
     def __init__(self, input_size, hidden_sizes, num_classes, damping_factor=0.7):
         super(RecurrentFFNet, self).__init__()
 
-        self.layers = nn.ModuleList()
+        self.input_layer = InputLayer()
 
+        self.layers = nn.ModuleList()
         prev_size = input_size
         for size in hidden_sizes:
             self.layers.append(HiddenLayer(prev_size, size, damping_factor))
             prev_size = size
-        self.layers.append(OutputLayer(prev_size, num_classes))
+
+        self.output_layer = OutputLayer(prev_size, num_classes)
+
+        # attach layers to each other
+        for i, hidden_layer in enumerate(self.layers):
+            if i == 0:
+                hidden_layer.set_previous_layer(self.input_layer)
+            else:
+                hidden_layer.set_previous_layer(self.layers[i - 1])
+
+        for i, hidden_layer in enumerate(self.layers):
+            if i == len(self.layers) - 1:
+                hidden_layer.set_next_layer(self.output_layer)
+            else:
+                hidden_layer.set_next_layer(self.layers[i + 1])
 
     def train():
         pass
 
     def test():
         pass
+
+class InputLayer:  
+    def __init__(self):
+        self.input = None
+
+    # This needs to be called rather than initialized since we don't know the input dimensions (particularly batch size) at time of network creation.
+    def set_input_matrix(self, input_matrix):
+        self.input = input_matrix
 
 class OutputLayer(nn.Linear):
     def __init__(self, prev_size, output_size):
@@ -110,6 +133,8 @@ class HiddenLayer(nn.Linear):
     def __init__(self, prev_size, size, damping_factor):
         super(HiddenLayer, self).__init__(prev_size, size)
         self.damping_factor = damping_factor
+        # TODO: will probably have to init these
+        self.activations = None
         pass
 
     def set_previous_layer(self, previous_layer):
