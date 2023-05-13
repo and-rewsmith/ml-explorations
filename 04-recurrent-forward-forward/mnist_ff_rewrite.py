@@ -87,18 +87,19 @@ def MNIST_loaders(train_batch_size=50000, test_batch_size=10000):
 class RecurrentFFNet(nn.Module):
     def __init__(self, input_size, hidden_sizes, num_classes, damping_factor=0.7):
         super(RecurrentFFNet, self).__init__()
-        self.input_size = input_size
-        self.hidden_sizes = hidden_sizes
-        self.num_classes = num_classes
-        self.damping_factor = damping_factor
+        # self.input_size = input_size
+        # self.hidden_sizes = hidden_sizes
+        # self.num_classes = num_classes
+        # self.damping_factor = damping_factor
 
         # Define the linear layers
         self.layers = nn.ModuleList()
+
         prev_size = input_size
         for size in hidden_sizes:
-            self.layers.append(nn.Linear(prev_size, size))
+            self.layers.append(HiddenLayer(prev_size, size, damping_factor))
             prev_size = size
-        self.layers.append(nn.Linear(prev_size, num_classes))
+        self.layers.append(OutputLayer(prev_size, num_classes))
 
     def train():
         pass
@@ -106,8 +107,20 @@ class RecurrentFFNet(nn.Module):
     def test():
         pass
 
-class Layer:
-    def __init__(self):
+class OutputLayer(nn.Linear):
+    def __init__(self, prev_size, output_size):
+        super(OutputLayer, self).__init__(prev_size, output_size)
+
+class HiddenLayer(nn.Linear):
+    def __init__(self, prev_size, size, damping_factor):
+        super(HiddenLayer, self).__init__(prev_size, size)
+        self.damping_factor = damping_factor
+        pass
+
+    def set_previous_layer(self, previous_layer):
+        pass
+
+    def set_next_layer(self, next_layer):
         pass
 
     # TODO: figure out the best way to model the input and output layers
@@ -116,3 +129,19 @@ class Layer:
 
     def forward():
         pass
+
+
+if __name__ == "__main__":
+    # this ensures that the current MacOS version is at least 12.3+
+    assert (torch.backends.mps.is_available())
+    # this ensures that the current current PyTorch installation was built with MPS activated.
+    assert (torch.backends.mps.is_built())
+    # set the output to device: mps
+    device = torch.device("mps")
+
+    torch.autograd.set_detect_anomaly(True)
+
+    torch.manual_seed(1234)
+
+    train_loader, test_loader = MNIST_loaders()
+    model = RecurrentFFNet(784, [500, 250], 10).to(device)
