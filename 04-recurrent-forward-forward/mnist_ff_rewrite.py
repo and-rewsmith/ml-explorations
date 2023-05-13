@@ -87,12 +87,7 @@ def MNIST_loaders(train_batch_size=50000, test_batch_size=10000):
 class RecurrentFFNet(nn.Module):
     def __init__(self, input_size, hidden_sizes, num_classes, damping_factor=0.7):
         super(RecurrentFFNet, self).__init__()
-        # self.input_size = input_size
-        # self.hidden_sizes = hidden_sizes
-        # self.num_classes = num_classes
-        # self.damping_factor = damping_factor
 
-        # Define the linear layers
         self.layers = nn.ModuleList()
 
         prev_size = input_size
@@ -123,7 +118,6 @@ class HiddenLayer(nn.Linear):
     def set_next_layer(self, next_layer):
         pass
 
-    # TODO: figure out the best way to model the input and output layers
     def train():
         pass
 
