@@ -24,6 +24,7 @@ logging.basicConfig(level=logging.INFO,
 # 2 - Implement layer local training
 #     - we can reference the pytorch ff example for this, also (https://github.com/cozheyuanzhangde/Forward-Forward/blob/main/model.py)
 # 3 - Implement dedicated recurrent weights
+# 4 - Experiment with more layers
 ITERATIONS = 10
 THRESHOLD = .25
 LEARNING_RATE = 0.0001
