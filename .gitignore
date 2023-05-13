@@ -15,8 +15,6 @@ logs
 # numpy files
 *.npy
 
-*.txt
-
 .vscode
 
 .DS_Store
