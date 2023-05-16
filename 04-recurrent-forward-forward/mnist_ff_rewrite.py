@@ -35,38 +35,6 @@ ITERATIONS = 10
 THRESHOLD = .25
 LEARNING_RATE = 0.0001
 
-"""
-TIMELINE:
-- Network class
-- Network class has an init function
-  + takes in input size, hidden sizes, num classes, and damping factor
-  + create the layer class instances for all hidden layers
-  + create a special InputLayer class instance and an OutputLayer class instance
-- Network class has train function
-  + takes in positive data, negative data, pos labels, neg labels
-  + for layer in layers: layer.train()
-- Network class has a test function
-  + takes in data
-  + for each possible label:
-      for iteration in ITERATIONS:
-          for layer in layers: layer.forward()
-      calculate goodness and store
-    return the label with the highest goodness
-- Layer class
-- Layer class has an init function
-  + takes in prev_size, size, previous layer, next layer, damping factor
-  + creates its own weight matrices (creating 2 weight matrices one for forward connection and one for backward)
-  + initializes previous activations and current activations as all 0s
-- Layer class has train function
-  + takes in positive activations and negative activations
-  + feeds in positive activations, gets output activations, calculates goodness, and does backwards + step
-  + feeds in negative activations, gets output activations, calculates goodness, and does backwards + step
-- Layer class has a forward function
-  + takes in activations
-  + uses its own weights, the previous layer's weights, and the previous timesteps activations to calculate the current activations
-"""
-
-
 def MNIST_loaders(train_batch_size=50000, test_batch_size=10000):
     transform = Compose([
         ToTensor(),
@@ -130,19 +98,17 @@ def layer_activations_to_goodness(layer_activations):
 class RecurrentFFNet(nn.Module):
     # Ties all the layers together.
     # TODO: look to see if I should be overriding reset_net()
-    def __init__(self, input_size, hidden_sizes, num_classes, damping_factor=0.7):
+    def __init__(self, batch_size, input_size, hidden_sizes, num_classes, damping_factor=0.7):
         super(RecurrentFFNet, self).__init__()
 
         self.layers = nn.ModuleList()
         prev_size = input_size
         for size in hidden_sizes:
-            hidden_layer = HiddenLayer(prev_size, size, damping_factor)
+            hidden_layer = HiddenLayer(batch_size, prev_size, size, damping_factor)
             optimizer = torch.optim.SGD(hidden_layer.parameters(), lr=LEARNING_RATE)
             hidden_layer.set_opt(optimizer)
             self.layers.append(hidden_layer)
             prev_size = size
-
-        self.output_layer = OutputLayer(prev_size, num_classes)
 
         # attach layers to each other
         for i, hidden_layer in enumerate(self.layers):
@@ -254,15 +220,9 @@ class RecurrentFFNet(nn.Module):
             print("Loss for layer " + str(i) + ": " + str(loss))
         return total_loss
 
-
-# TODO: document that we are storing weights transposed
-class OutputLayer(nn.Linear):
-    def __init__(self, prev_size, output_size):
-        super(OutputLayer, self).__init__(output_size, prev_size)
-
 class HiddenLayer(nn.Module):
     def __init__(self, batch_size, prev_size, size, damping_factor):
-        super(HiddenLayer, self).__init__(prev_size, size)
+        super(HiddenLayer, self).__init__()
 
         self.activations_dim = (batch_size, size)
 
@@ -279,6 +239,36 @@ class HiddenLayer(nn.Module):
 
         self.previous_layer = None
         self.next_layer = None
+
+    def _apply(self, fn):
+        # Apply `fn` to each parameter and buffer of this layer
+        for param in self._parameters.values():
+            if param is not None:
+                # Tensors stored in modules are graph leaves, and we don't
+                # want to create copy nodes, so we have to unpack the data.
+                param.data = fn(param.data)
+                if param._grad is not None:
+                    param._grad.data = fn(param._grad.data)
+
+        for key, buf in self._buffers.items():
+            if buf is not None:
+                self._buffers[key] = fn(buf)
+
+        # Then remove `previous_layer` and `next_layer` temporarily
+        previous_layer = self.previous_layer
+        next_layer = self.next_layer
+        self.previous_layer = None
+        self.next_layer = None
+
+        # Apply `fn` to submodules
+        for module in self.children():
+            module._apply(fn)
+
+        # Restore `previous_layer` and `next_layer`
+        self.previous_layer = previous_layer
+        self.next_layer = next_layer
+
+        return self
     
     def set_opt(self, optimizer):
         self.optimizer = optimizer
@@ -303,10 +293,10 @@ class HiddenLayer(nn.Module):
         self.predict_activations.advance()
 
     def set_previous_layer(self, previous_layer):
-        self.set_previous_layer = previous_layer
+        self.previous_layer = previous_layer
 
     def set_next_layer(self, next_layer):
-        self.set_next_layer = next_layer
+        self.next_layer = next_layer
 
     def train(self, input_data, label_data, should_damp):
         self.optimizer.zero_grad()
@@ -477,4 +467,6 @@ if __name__ == "__main__":
     torch.manual_seed(1234)
 
     train_loader, test_loader = MNIST_loaders()
-    model = RecurrentFFNet(784, [500, 250], 10).to(device)
+    x = next(iter(train_loader))
+
+    model = RecurrentFFNet(len(x), 784, [500, 250], 10).to(device)
