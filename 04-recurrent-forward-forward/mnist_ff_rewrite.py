@@ -176,11 +176,12 @@ class RecurrentFFNet(nn.Module):
             layer.reset_activations(isTraining)
 
     def train(self, input_data, label_data):
-        print("grad: " + str(self.layers[0].forward_linear.weight.grad))
+        # print("grad: " + str(self.layers[0].forward_linear.weight.grad))
 
         for epoch in range(0, EPOCHS):
             logging.info("Epoch: " + str(epoch))
             self.reset_activations(True)
+
             for preinit_step in range(0, len(self.layers)):
                 logging.info("Preinitialization step: " + str(preinit_step))
                 self.__advance_layers_forward(ForwardMode.PositiveData,
@@ -466,13 +467,13 @@ class HiddenLayer(nn.Module):
                 p=2, dim=1, keepdim=True)
             prev_layer_norm = prev_layer_prev_timestep_activations.norm(
                 p=2, dim=1, keepdim=True)
-            new_activation = F.linear(prev_layer_norm, self.forward_linear.weight) + \
-                F.linear(next_layer_norm,
-                         self.next_layer.backward_linear.weight)
-            new_activation = F.relu(new_activation)
+            new_activation = F.relu(F.linear(prev_layer_norm, self.forward_linear.weight) +
+                                    F.linear(next_layer_norm,
+                                             self.next_layer.backward_linear.weight))
             if should_damp:
+                old_activation = new_activation
                 new_activation = (1 - self.damping_factor) * \
-                    prev_act + self.damping_factor * new_activation
+                    prev_act + self.damping_factor * old_activation
 
             if mode == ForwardMode.PositiveData:
                 self.pos_activations.current = new_activation
@@ -493,13 +494,13 @@ class HiddenLayer(nn.Module):
                 prev_act = self.predict_activations.previous
             prev_act = prev_act.detach()
 
-            new_activation = F.linear(
-                data, self.forward_linear.weight) + F.linear(labels, self.next_layer.backward_linear.weight)
-            new_activation = F.relu(new_activation)
+            new_activation = F.relu(F.linear(
+                data, self.forward_linear.weight) + F.linear(labels, self.next_layer.backward_linear.weight))
 
             if should_damp:
+                old_activation = new_activation
                 new_activation = (1 - self.damping_factor) * \
-                    prev_act + self.damping_factor * new_activation
+                    prev_act + self.damping_factor * old_activation
 
             if mode == ForwardMode.PositiveData:
                 self.pos_activations.current = new_activation
@@ -525,13 +526,13 @@ class HiddenLayer(nn.Module):
             prev_act = prev_act.detach()
             next_layer_prev_timestep_activations = next_layer_prev_timestep_activations.detach()
 
-            new_activation = F.linear(data, self.forward_linear.weight) + F.linear(
-                next_layer_prev_timestep_activations, self.next_layer.backward_linear.weight)
-            new_activation = F.relu(new_activation)
+            new_activation = F.relu(F.linear(data, self.forward_linear.weight) + F.linear(
+                next_layer_prev_timestep_activations, self.next_layer.backward_linear.weight))
 
             if should_damp:
+                old_activation = new_activation
                 new_activation = (1 - self.damping_factor) * \
-                    prev_act + self.damping_factor * new_activation
+                    prev_act + self.damping_factor * old_activation
 
             if mode == ForwardMode.PositiveData:
                 self.pos_activations.current = new_activation
@@ -555,14 +556,15 @@ class HiddenLayer(nn.Module):
                 prev_layer_prev_timestep_activations = self.previous_layer.predict_activations.previous
                 prev_act = self.predict_activations.previous
             prev_act = prev_act.detach()
+            prev_layer_prev_timestep_activations = prev_layer_prev_timestep_activations.detach()
 
-            new_activation = F.linear(prev_layer_prev_timestep_activations,
-                                      self.forward_linear.weight) + F.linear(labels, self.next_layer.backward_linear.weight)
-            new_activation = F.relu(new_activation)
+            new_activation = F.relu(F.linear(prev_layer_prev_timestep_activations,
+                                             self.forward_linear.weight) + F.linear(labels, self.next_layer.backward_linear.weight))
 
             if should_damp:
+                old_activation = new_activation
                 new_activation = (1 - self.damping_factor) * \
-                    prev_act + self.damping_factor * new_activation
+                    prev_act + self.damping_factor * old_activation
 
             if mode == ForwardMode.PositiveData:
                 self.pos_activations.current = new_activation
@@ -617,7 +619,7 @@ if __name__ == "__main__":
 
     # Create and run model.
     model = RecurrentFFNet(train_batch_size, test_batch_size, INPUT_SIZE, [
-        500], NUM_CLASSES).to(device)
+        500, 250], NUM_CLASSES).to(device)
 
     model.train(input_data, label_data)
 
