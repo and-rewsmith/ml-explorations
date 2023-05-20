@@ -11,7 +11,7 @@ import torchviz
 from enum import Enum
 
 # logging.basicConfig(filename="log.log", level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 # QUESTIONS:
@@ -29,6 +29,7 @@ logging.basicConfig(level=logging.INFO,
 # 5 - Experiment with weight initialization
 # 6 - Experiment with activation initialization
 # 7 - Docstrings
+# 8 - Stop using nn.Linear if all we need are simple weights
 
 EPOCHS = 1
 ITERATIONS = 10
@@ -90,6 +91,12 @@ class Activations:
         self.current = self.previous
 
 
+class OutputLayer:
+    def __init__(self, prev_size, label_size) -> None:
+        self.backward_linear = nn.Linear(
+            label_size, prev_size)
+
+
 class ForwardMode(Enum):
     PositiveData = 1
     NegativeData = 2
@@ -132,6 +139,8 @@ class RecurrentFFNet(nn.Module):
             self.layers.append(hidden_layer)
             prev_size = size
 
+        self.output_layer = OutputLayer(hidden_sizes[-1], num_classes)
+
         # attach layers to each other
         for i, hidden_layer in enumerate(self.layers):
             if i != 0:
@@ -140,6 +149,8 @@ class RecurrentFFNet(nn.Module):
         for i, hidden_layer in enumerate(self.layers):
             if i != len(self.layers) - 1:
                 hidden_layer.set_next_layer(self.layers[i + 1])
+            else:
+                hidden_layer.set_next_layer(self.output_layer)
 
         logging.info("finished initializing network")
 
@@ -152,7 +163,7 @@ class RecurrentFFNet(nn.Module):
             logging.info("Epoch: " + str(epoch))
             self.reset_activations()
             for preinit_step in range(0, len(self.layers)):
-                logging.info("Preinitialize step: : " + str(preinit_step))
+                logging.info("Preinitialization step: " + str(preinit_step))
                 total_loss = self.__advance_layers_train(
                     input_data, label_data, False)
                 logging.info("Average layer loss: " +
@@ -219,6 +230,7 @@ class RecurrentFFNet(nn.Module):
     def __advance_layers_train(self, input_data, label_data, should_damp):
         total_loss = 0
         for i, layer in enumerate(self.layers):
+            logging.debug("Training layer " + str(i))
             loss = None
             if i == 0 and len(self.layers) == 1:
                 loss = layer.train(input_data, label_data, should_damp)
@@ -310,23 +322,23 @@ class HiddenLayer(nn.Module):
     # TODO: we can optimize for memory by enabling distinct train / predict mode
     def reset_activations(self):
         pos_activations_current = torch.randn(
-            self.activations_dim[0], self.activations_dim[1])
+            self.activations_dim[0], self.activations_dim[1]).to(device)
         pos_activations_previous = torch.randn(
-            self.activations_dim[0], self.activations_dim[1])
+            self.activations_dim[0], self.activations_dim[1]).to(device)
         self.pos_activations = Activations(
             pos_activations_current, pos_activations_previous)
 
         neg_activations_current = torch.randn(
-            self.activations_dim[0], self.activations_dim[1])
+            self.activations_dim[0], self.activations_dim[1]).to(device)
         neg_activations_previous = torch.randn(
-            self.activations_dim[0], self.activations_dim[1])
+            self.activations_dim[0], self.activations_dim[1]).to(device)
         self.neg_activations = Activations(
             neg_activations_current, neg_activations_previous)
 
         predict_activations_current = torch.randn(
-            self.activations_dim[0], self.activations_dim[1])
+            self.activations_dim[0], self.activations_dim[1]).to(device)
         predict_activations_previous = torch.randn(
-            self.activations_dim[0], self.activations_dim[1])
+            self.activations_dim[0], self.activations_dim[1]).to(device)
         self.predict_activations = Activations(
             predict_activations_current, predict_activations_previous)
 
@@ -355,11 +367,14 @@ class HiddenLayer(nn.Module):
                 ForwardMode.NegativeData, neg_input, neg_labels, should_damp)
 
         elif input_data != None:
+            print("expect")
             (pos_input, neg_input) = input_data
             pos_activations = self.forward(
                 ForwardMode.PositiveData, pos_input, None, should_damp)
+            print("first forward complete")
             neg_activations = self.forward(
                 ForwardMode.NegativeData, neg_input, None, should_damp)
+            print("second forward complete")
         elif label_data != None:
             (pos_labels, neg_labels) = label_data
             pos_activations = self.forward(
@@ -412,7 +427,8 @@ class HiddenLayer(nn.Module):
             prev_layer_norm = prev_layer_prev_timestep_activations.norm(
                 p=2, dim=1, keepdim=True)
             new_activation = F.linear(prev_layer_norm, self.forward_linear.weight) + \
-                F.linear(next_layer_norm, self.backward_linear.weight)
+                F.linear(next_layer_norm,
+                         self.next_layer.backward_linear.weight)
             new_activation = F.relu(new_activation)
             if should_damp:
                 new_activation = (1 - self.damping_factor) * \
@@ -437,7 +453,7 @@ class HiddenLayer(nn.Module):
                 prev_act = self.predict_activations.previous
 
             new_activation = F.linear(
-                data, self.forward_linear.weight) + F.linear(labels, self.backward_linear.weight)
+                data, self.forward_linear.weight) + F.linear(labels, self.output_layer.backward_linear.weight)
             new_activation = F.relu(new_activation)
 
             if should_damp:
@@ -466,9 +482,16 @@ class HiddenLayer(nn.Module):
                 next_layer_prev_timestep_activations = self.next_layer.predict_activations.previous
                 prev_act = self.predict_activations.previous
 
+            print("before linear")
+            print("data shape: ", data.shape)
+            print("forward linear shape: ", self.forward_linear.weight.shape)
+            print("next layer shape: ", next_layer_prev_timestep_activations.shape)
+            print("backward linear shape: ",
+                  self.next_layer.backward_linear.weight.shape)
             new_activation = F.linear(data, self.forward_linear.weight) + F.linear(
-                next_layer_prev_timestep_activations, self.backward_linear.weight)
+                next_layer_prev_timestep_activations, self.next_layer.backward_linear.weight)
             new_activation = F.relu(new_activation)
+            print("after linear")
 
             if should_damp:
                 new_activation = (1 - self.damping_factor) * \
@@ -498,7 +521,7 @@ class HiddenLayer(nn.Module):
                 prev_act = self.predict_activations.previous
 
             new_activation = F.linear(prev_layer_prev_timestep_activations,
-                                      self.forward_linear.weight) + F.linear(labels, self.backward_linear.weight)
+                                      self.forward_linear.weight) + F.linear(labels, self.output_layer.backward_linear.weight)
             new_activation = F.relu(new_activation)
 
             if should_damp:
