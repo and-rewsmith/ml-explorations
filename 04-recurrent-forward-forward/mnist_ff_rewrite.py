@@ -36,6 +36,7 @@ ITERATIONS = 10
 THRESHOLD = .25
 LEARNING_RATE = 0.0001
 
+INPUT_SIZE = 784
 NUM_CLASSES = 10
 
 
@@ -615,8 +616,7 @@ if __name__ == "__main__":
     test_data = TestData(x, one_hot_labels, labels)
 
     # Create and run model.
-    pixels = 784
-    model = RecurrentFFNet(train_batch_size, test_batch_size, pixels, [
+    model = RecurrentFFNet(train_batch_size, test_batch_size, INPUT_SIZE, [
         500], NUM_CLASSES).to(device)
 
     model.train(input_data, label_data)
