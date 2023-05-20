@@ -10,7 +10,7 @@ import logging
 import torchviz
 from enum import Enum
 
-# logging.basicConfig(filename="log.log", level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# logging.basicConfig(filename="log.log", level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -30,11 +30,13 @@ logging.basicConfig(level=logging.DEBUG,
 # 8 - Stop using nn.Linear if all we need are simple weights
 # 9 - Try different optimizers
 # 10 - Model.eval()? We are not using it now.
+# 11 - Why are we getting an error?
 
-EPOCHS = 20
+EPOCHS = 10
 ITERATIONS = 10
 THRESHOLD = .25
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.001
+# LEARNING_RATE = 0.0001
 
 INPUT_SIZE = 784
 NUM_CLASSES = 10
@@ -175,9 +177,7 @@ class RecurrentFFNet(nn.Module):
         for layer in self.layers:
             layer.reset_activations(isTraining)
 
-    def train(self, input_data, label_data):
-        # print("grad: " + str(self.layers[0].forward_linear.weight.grad))
-
+    def train(self, input_data, label_data, test_data):
         for epoch in range(0, EPOCHS):
             logging.info("Epoch: " + str(epoch))
             self.reset_activations(True)
@@ -203,6 +203,8 @@ class RecurrentFFNet(nn.Module):
                     input_data, label_data, True)
                 logging.info("Average layer loss: " +
                              str(total_loss / len(self.layers)))
+
+            self.predict(test_data)
 
     def predict(self, test_data):
         with torch.no_grad():
@@ -242,6 +244,8 @@ class RecurrentFFNet(nn.Module):
 
             # select the label with the maximum goodness
             predicted_labels = torch.argmax(all_labels_goodness, dim=1)
+            print("predicted labels: " + str(predicted_labels))
+            print("actual labels: " + str(labels))
 
             total = data.size(0)
             correct = (predicted_labels == labels).sum().item()
@@ -406,6 +410,7 @@ class HiddenLayer(nn.Module):
             neg_activations = self.forward(
                 ForwardMode.NegativeData, neg_input, None, should_damp)
         elif label_data != None:
+            print("-----sanity check we are here")
             (pos_labels, neg_labels) = label_data
             pos_activations = self.forward(
                 ForwardMode.PositiveData, None, pos_labels, should_damp)
@@ -419,13 +424,34 @@ class HiddenLayer(nn.Module):
 
         pos_goodness = layer_activations_to_goodness(pos_activations)
         neg_goodness = layer_activations_to_goodness(neg_activations)
+
+        logging.debug("pos goodness: " + str(pos_goodness))
+        logging.debug("neg goodness: " + str(neg_goodness))
+
         layer_loss = torch.log(1 + torch.exp(torch.cat([
             (-1 * pos_goodness) + THRESHOLD,
             neg_goodness - THRESHOLD
         ]))).mean()
+
+
+        layer_loss.backward()
+
         # torchviz.make_dot(layer_loss, params=dict(
         #     model.named_parameters())).render("graph", format="png")
-        layer_loss.backward()
+
+        # if input_data != None:
+        #     print("[expect] first layer grad (forwards): " + str(self.forward_linear.weight.grad))
+        #     print("[expect] first layer grad (backwards): " + str(self.next_layer.backward_linear.weight.grad))
+        #     print("second layer grad (forwards): " + str(self.next_layer.forward_linear.weight.grad))
+        #     print("second layer grad (backwards): " + str(self.next_layer.next_layer.backward_linear.weight.grad))
+        # else:
+        #     print("first layer grad (forwards): " + str(self.previous_layer.forward_linear.weight.grad))
+        #     print("first layer grad (backwards): " + str(self.backward_linear.weight.grad))
+        #     print("[expect] second layer grad (forwards): " + str(self.forward_linear.weight.grad))
+        #     print("[expect] second layer grad (backwards): " + str(self.next_layer.backward_linear.weight.grad))
+
+        # input()
+
         optimizer.step()
         optimizer.zero_grad()
 
@@ -462,7 +488,6 @@ class HiddenLayer(nn.Module):
             prev_layer_prev_timestep_activations = prev_layer_prev_timestep_activations.detach()
             prev_act = prev_act.detach()
 
-            # TODO: we may want to detach these
             next_layer_norm = next_layer_prev_timestep_activations.norm(
                 p=2, dim=1, keepdim=True)
             prev_layer_norm = prev_layer_prev_timestep_activations.norm(
@@ -619,8 +644,8 @@ if __name__ == "__main__":
 
     # Create and run model.
     model = RecurrentFFNet(train_batch_size, test_batch_size, INPUT_SIZE, [
-        500, 250], NUM_CLASSES).to(device)
+        500], NUM_CLASSES).to(device)
 
-    model.train(input_data, label_data)
+    model.train(input_data, label_data, test_data)
 
     model.predict(test_data)
