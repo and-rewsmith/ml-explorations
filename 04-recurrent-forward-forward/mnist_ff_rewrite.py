@@ -29,8 +29,9 @@ logging.basicConfig(level=logging.DEBUG,
 # 7 - Docstrings
 # 8 - Stop using nn.Linear if all we need are simple weights
 # 9 - Try different optimizers
+# 10 - Model.eval()? We are not using it now.
 
-EPOCHS = 1
+EPOCHS = 20
 ITERATIONS = 10
 THRESHOLD = .25
 LEARNING_RATE = 0.0001
@@ -77,6 +78,18 @@ class LabelData:
     def __iter__(self):
         yield self.pos_labels
         yield self.neg_labels
+
+
+class TestData:
+    def __init__(self, input, one_hot_labels, labels):
+        self.input = input
+        self.one_hot_labels = one_hot_labels
+        self.labels = labels
+
+    def __iter__(self):
+        yield self.input
+        yield self.one_hot_labels
+        yield self.labels
 
 
 class Activations:
@@ -128,7 +141,7 @@ def layer_activations_to_goodness(layer_activations):
 class RecurrentFFNet(nn.Module):
     # Ties all the layers together.
     # TODO: look to see if I should be overriding reset_net()
-    def __init__(self, batch_size, input_size, hidden_sizes, num_classes, damping_factor=0.7):
+    def __init__(self, train_batch_size, test_batch_size, input_size, hidden_sizes, num_classes, damping_factor=0.7):
         logging.info("initializing network")
         super(RecurrentFFNet, self).__init__()
 
@@ -136,7 +149,7 @@ class RecurrentFFNet(nn.Module):
         prev_size = input_size
         for size in hidden_sizes:
             hidden_layer = HiddenLayer(
-                batch_size, prev_size, size, damping_factor)
+                train_batch_size, test_batch_size, prev_size, size, damping_factor)
             self.layers.append(hidden_layer)
             prev_size = size
 
@@ -157,16 +170,16 @@ class RecurrentFFNet(nn.Module):
 
         logging.info("finished initializing network")
 
-    def reset_activations(self):
+    def reset_activations(self, isTraining):
         for layer in self.layers:
-            layer.reset_activations()
+            layer.reset_activations(isTraining)
 
     def train(self, input_data, label_data):
         print("grad: " + str(self.layers[0].forward_linear.weight.grad))
 
         for epoch in range(0, EPOCHS):
             logging.info("Epoch: " + str(epoch))
-            self.reset_activations()
+            self.reset_activations(True)
             for preinit_step in range(0, len(self.layers)):
                 logging.info("Preinitialization step: " + str(preinit_step))
                 self.__advance_layers_forward(ForwardMode.PositiveData,
@@ -190,55 +203,51 @@ class RecurrentFFNet(nn.Module):
                              str(total_loss / len(self.layers)))
 
     def predict(self, test_data):
-        self.eval()
+        with torch.no_grad():
+            data, one_hot_labels, labels = test_data
+            data = data.to(device)
+            one_hot_labels = one_hot_labels.to(device)
+            labels = labels.to(device)
 
-        with torch.no_grad:
-            for input_data, label_data in test_data:
-                images = images.to(device)
-                labels = labels.to(device)
+            all_labels_goodness = []
 
-                all_labels_goodness = []
+            # evaluate goodness for each possible label
+            for label in range(NUM_CLASSES):
+                self.reset_activations(False)
 
-                # evaluate goodness for each possible label
-                for label in range(model.num_classes):
-                    self.reset_activations()
+                one_hot_labels = torch.zeros(
+                    data.shape[0], NUM_CLASSES, device=device)
+                one_hot_labels[:, label] = 1.0
 
-                    one_hot_labels = torch.zeros(
-                        images.shape[0], model.num_classes, device=device)
-                    one_hot_labels[:, label] = 1.0
+                for preinit in range(0, len(model.layers)):
+                    logging.info("Preinitialization: " + str(preinit))
+                    self.__advance_layers_forward(ForwardMode.PredictData,
+                                                  data, one_hot_labels, False)
 
-                    for i in len(model.layers):
-                        logging.info("Iteration: " + str(iteration))
-                        total_loss = self.__advance_layers_forward(
-                            input_data, label_data, False)
-                        logging.info("Average layer loss: " +
-                                     str(total_loss) / ITERATIONS)
+                for iteration in range(0, ITERATIONS):
+                    logging.info("Iteration: " + str(iteration))
+                    self.__advance_layers_forward(ForwardMode.PredictData,
+                                                  data, one_hot_labels, True)
 
-                    for iteration in range(ITERATIONS):
-                        logging.info("Iteration: " + str(iteration))
-                        total_loss = self.__advance_layers_forward(
-                            input_data, label_data, True)
-                        logging.info("Average layer loss: " +
-                                     str(total_loss) / ITERATIONS)
+                # TODO: optimize this to not have lists
+                activations = [
+                    layer.predict_activations.current for layer in model.layers]
+                goodness = activations_to_goodness(activations)
+                goodness = torch.stack(goodness, dim=1).mean(dim=1)
+                all_labels_goodness.append(goodness)
 
-                    # TODO: optimize this to not have lists
-                    activations = [layer.activations for layer in model.layers]
-                    goodness = activations_to_goodness(activations)
-                    goodness = torch.stack(goodness, dim=1).mean(dim=1)
-                    all_labels_goodness.append(goodness)
+            all_labels_goodness = torch.stack(all_labels_goodness, dim=1)
 
-                all_labels_goodness = torch.stack(all_labels_goodness, dim=1)
+            # select the label with the maximum goodness
+            predicted_labels = torch.argmax(all_labels_goodness, dim=1)
 
-                # select the label with the maximum goodness
-                predicted_labels = torch.argmax(all_labels_goodness, dim=1)
+            total = data.size(0)
+            correct = (predicted_labels == labels).sum().item()
 
-                total += images.size(0)
-                correct += (predicted_labels == labels).sum().item()
+        accuracy = 100 * correct / total
+        logging.info(f'test accuracy: {accuracy}%')
 
-            accuracy = 100 * correct / total
-            logging.info(f'test accuracy: {accuracy}%')
-
-            return accuracy
+        return accuracy
 
     def __advance_layers_train(self, input_data, label_data, should_damp):
         total_loss = 0
@@ -279,22 +288,20 @@ class RecurrentFFNet(nn.Module):
             else:
                 layer.forward(mode, None, None, should_damp)
 
-            logging.debug("Forwarded activations for layer " +
-                          str(i))
-
 
 class HiddenLayer(nn.Module):
-    def __init__(self, batch_size, prev_size, size, damping_factor):
+    def __init__(self, train_batch_size, test_batch_size, prev_size, size, damping_factor):
         super(HiddenLayer, self).__init__()
 
-        self.activations_dim = (batch_size, size)
+        self.train_activations_dim = (train_batch_size, size)
+        self.test_activations_dim = (test_batch_size, size)
 
         self.damping_factor = damping_factor
 
         self.pos_activations = None
         self.neg_activations = None
         self.predict_activations = None
-        self.reset_activations()
+        self.reset_activations(True)
 
         # TODO: weight ordering?
         self.forward_linear = nn.Linear(prev_size, size)
@@ -334,25 +341,31 @@ class HiddenLayer(nn.Module):
         return self
 
     # TODO: we can optimize for memory by enabling distinct train / predict mode
-    def reset_activations(self):
+    def reset_activations(self, isTraining):
+        activations_dim = None
+        if isTraining:
+            activations_dim = self.train_activations_dim
+        else:
+            activations_dim = self.test_activations_dim
+
         pos_activations_current = torch.randn(
-            self.activations_dim[0], self.activations_dim[1]).to(device)
+            activations_dim[0], activations_dim[1]).to(device)
         pos_activations_previous = torch.randn(
-            self.activations_dim[0], self.activations_dim[1]).to(device)
+            activations_dim[0], activations_dim[1]).to(device)
         self.pos_activations = Activations(
             pos_activations_current, pos_activations_previous)
 
         neg_activations_current = torch.randn(
-            self.activations_dim[0], self.activations_dim[1]).to(device)
+            activations_dim[0], activations_dim[1]).to(device)
         neg_activations_previous = torch.randn(
-            self.activations_dim[0], self.activations_dim[1]).to(device)
+            activations_dim[0], activations_dim[1]).to(device)
         self.neg_activations = Activations(
             neg_activations_current, neg_activations_previous)
 
         predict_activations_current = torch.randn(
-            self.activations_dim[0], self.activations_dim[1]).to(device)
+            activations_dim[0], activations_dim[1]).to(device)
         predict_activations_previous = torch.randn(
-            self.activations_dim[0], self.activations_dim[1]).to(device)
+            activations_dim[0], activations_dim[1]).to(device)
         self.predict_activations = Activations(
             predict_activations_current, predict_activations_previous)
 
@@ -566,24 +579,24 @@ if __name__ == "__main__":
     assert (torch.backends.mps.is_built())
     device = torch.device("mps")
 
+    # Pytorch utils.
     torch.autograd.set_detect_anomaly(True)
-
     torch.manual_seed(1234)
 
+    # Generate train data.
     train_loader, test_loader = MNIST_loaders()
     # TODO: put this on the device initially?
     x, y_pos = next(iter(train_loader))
     x, y_pos = x.to(device), y_pos.to(device)
+    train_batch_size = len(x)
 
     shuffled_labels = torch.randperm(x.size(0))
     y_neg = y_pos[shuffled_labels]
 
-    # prepare positive one-hot encoded labels
     positive_one_hot_labels = torch.zeros(
         len(y_pos), NUM_CLASSES, device=device)
     positive_one_hot_labels.scatter_(1, y_pos.unsqueeze(1), 1.0)
 
-    # prepare negative one-hot encoded labels
     negative_one_hot_labels = torch.zeros(
         len(y_neg), NUM_CLASSES, device=device)
     negative_one_hot_labels.scatter_(1, y_neg.unsqueeze(1), 1.0)
@@ -591,13 +604,21 @@ if __name__ == "__main__":
     input_data = InputData(x, x)
     label_data = LabelData(positive_one_hot_labels, negative_one_hot_labels)
 
-    batch_size = len(x)
+    # Generate test data.
+    x, y = next(iter(test_loader))
+    x, y = x.to(device), y.to(device)
+    test_batch_size = len(x)
+    labels = y
+    one_hot_labels = torch.zeros(
+        len(y), NUM_CLASSES, device=device)
+    one_hot_labels.scatter_(1, y.unsqueeze(1), 1.0)
+    test_data = TestData(x, one_hot_labels, labels)
+
+    # Create and run model.
     pixels = 784
-    model = RecurrentFFNet(batch_size, pixels, [
-                           500], NUM_CLASSES).to(device)
+    model = RecurrentFFNet(train_batch_size, test_batch_size, pixels, [
+        500], NUM_CLASSES).to(device)
 
     model.train(input_data, label_data)
 
-    x, y_pos = next(iter(test_loader))
-    print(x.shape)
-    # model.test(input_data, label_data)
+    model.predict(test_data)
