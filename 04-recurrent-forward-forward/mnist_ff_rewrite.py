@@ -62,17 +62,29 @@ class InputData:
         self.pos_input = pos_input
         self.neg_input = neg_input
 
+    def __iter__(self):
+        yield self.pos_input
+        yield self.neg_input
+
 
 class LabelData:
     def __init__(self, pos_labels, neg_labels):
         self.pos_labels = pos_labels
         self.neg_labels = neg_labels
 
+    def __iter__(self):
+        yield self.pos_labels
+        yield self.neg_labels
+
 
 class Activations:
     def __init__(self, current, previous):
         self.current = current
         self.previous = previous
+
+    def __iter__(self):
+        yield self.current
+        yield self.previous
 
     def advance(self):
         self.current = self.previous
@@ -106,6 +118,7 @@ class RecurrentFFNet(nn.Module):
     # Ties all the layers together.
     # TODO: look to see if I should be overriding reset_net()
     def __init__(self, batch_size, input_size, hidden_sizes, num_classes, damping_factor=0.7):
+        logging.info("initializing network")
         super(RecurrentFFNet, self).__init__()
 
         self.layers = nn.ModuleList()
@@ -128,25 +141,29 @@ class RecurrentFFNet(nn.Module):
             if i != len(self.layers) - 1:
                 hidden_layer.set_next_layer(self.layers[i + 1])
 
+        logging.info("finished initializing network")
+
     def reset_activations(self):
         for layer in self.layers:
             layer.reset_activations()
 
     def train(self, input_data, label_data):
-        for epoch in EPOCHS:
-            print("Epoch: " + str(epoch))
+        for epoch in range(0, EPOCHS):
+            logging.info("Epoch: " + str(epoch))
             self.reset_activations()
-            for preinit_step in len(self.layers):
-                print("Preinitialize step: : " + str(preinit_step))
+            for preinit_step in range(0, len(self.layers)):
+                logging.info("Preinitialize step: : " + str(preinit_step))
                 total_loss = self.__advance_layers_train(
                     input_data, label_data, False)
-                print("Average layer loss: " + str(total_loss) / ITERATIONS)
+                logging.info("Average layer loss: " +
+                             str(total_loss) / ITERATIONS)
 
             for iteration in ITERATIONS:
-                print("Iteration: " + str(iteration))
+                logging.info("Iteration: " + str(iteration))
                 total_loss = self.__advance_layers_train(
                     input_data, label_data, True)
-                print("Average layer loss: " + str(total_loss) / ITERATIONS)
+                logging.info("Average layer loss: " +
+                             str(total_loss) / ITERATIONS)
 
     def predict(self, test_data):
         self.eval()
@@ -167,18 +184,18 @@ class RecurrentFFNet(nn.Module):
                     one_hot_labels[:, label] = 1.0
 
                     for i in len(model.layers):
-                        print("Iteration: " + str(iteration))
+                        logging.info("Iteration: " + str(iteration))
                         total_loss = self.__advance_layers_forward(
                             input_data, label_data, False)
-                        print("Average layer loss: " +
-                              str(total_loss) / ITERATIONS)
+                        logging.info("Average layer loss: " +
+                                     str(total_loss) / ITERATIONS)
 
                     for iteration in range(ITERATIONS):
-                        print("Iteration: " + str(iteration))
+                        logging.info("Iteration: " + str(iteration))
                         total_loss = self.__advance_layers_forward(
                             input_data, label_data, True)
-                        print("Average layer loss: " +
-                              str(total_loss) / ITERATIONS)
+                        logging.info("Average layer loss: " +
+                                     str(total_loss) / ITERATIONS)
 
                     # TODO: optimize this to not have lists
                     activations = [layer.activations for layer in model.layers]
@@ -212,7 +229,7 @@ class RecurrentFFNet(nn.Module):
             else:
                 loss = layer.train(None, None, should_damp)
             total_loss += loss
-            print("Loss for layer " + str(i) + ": " + str(loss))
+            logging.info("Loss for layer " + str(i) + ": " + str(loss))
 
         for layer in self.layers:
             layer.advance_stored_activations()
@@ -232,7 +249,8 @@ class RecurrentFFNet(nn.Module):
             else:
                 loss = layer.forward(None, None, should_damp)
             total_loss += loss
-            print("Loss for layer " + str(i) + ": " + str(loss))
+            logging.info("Loss for layer " + str(i) + ": " + str(loss))
+
         return total_loss
 
 
@@ -498,11 +516,9 @@ class HiddenLayer(nn.Module):
 
 
 if __name__ == "__main__":
-    # this ensures that the current MacOS version is at least 12.3+
+    # This needs to change if not running mps backend
     assert (torch.backends.mps.is_available())
-    # this ensures that the current current PyTorch installation was built with MPS activated.
     assert (torch.backends.mps.is_built())
-    # set the output to device: mps
     device = torch.device("mps")
 
     torch.autograd.set_detect_anomaly(True)
@@ -517,6 +533,11 @@ if __name__ == "__main__":
     shuffled_labels = torch.randperm(x.size(0))
     y_neg = y_pos[shuffled_labels]
 
+    input_data = InputData(x, x)
+    label_data = LabelData(y_pos, y_neg)
+
     batch_size = len(x)
     pixels = 784
     model = RecurrentFFNet(batch_size, pixels, [500, 250], 10).to(device)
+
+    model.train(input_data, label_data)
