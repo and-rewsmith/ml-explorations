@@ -11,13 +11,13 @@ import torchviz
 from enum import Enum
 import numpy as np
 
-# logging.basicConfig(filename="log.log", level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 # QUESTIONS:
 # 1 - First layer activations get very sparse?
 # 2 - Why is the validation goodness so much lower than the training goodness?
+
 # TODO:
 # 1 - Implement side connections as shown in Fig3
 # 3 - Implement dedicated recurrent weights
@@ -192,12 +192,6 @@ class RecurrentFFNet(nn.Module):
                 for layer in self.layers:
                     layer.advance_stored_activations()
 
-                # for layer in self.layers:
-                #     print("layer activations previous: " +
-                #           str(layer.pos_activations.previous))
-                #     print("layer activations current: " +
-                #           str(layer.pos_activations.current))
-
             for iteration in range(0, ITERATIONS):
                 logging.info("Iteration: " + str(iteration))
                 total_loss = self.__advance_layers_train(
@@ -224,7 +218,7 @@ class RecurrentFFNet(nn.Module):
                     data.shape[0], NUM_CLASSES, device=device)
                 one_hot_labels[:, label] = 1.0
 
-                for preinit in range(0, len(self.layers)):
+                for _preinit in range(0, len(self.layers)):
                     self.__advance_layers_forward(ForwardMode.PredictData,
                                                   data, one_hot_labels, False)
 
@@ -239,22 +233,21 @@ class RecurrentFFNet(nn.Module):
                 # TODO: optimize this to not have lists
                 activations = [
                     layer.predict_activations.current for layer in self.layers]
-                # print("-----activations: " + str(activations))
                 goodness = activations_to_goodness(activations)
                 # TODO: convert to DEBUG?
-                print("layer goodness for prediction" + " " +
+                logging.debug("layer goodness for prediction" + " " +
                       str(label) + ": " + str(goodness))
                 goodness = torch.stack(goodness, dim=1).mean(dim=1)
                 all_labels_goodness.append(goodness)
-                print("overall goodness for prediction" +
+                logging.debug("overall goodness for prediction" +
                       str(label) + ": " + str(goodness))
 
             all_labels_goodness = torch.stack(all_labels_goodness, dim=1)
 
             # select the label with the maximum goodness
             predicted_labels = torch.argmax(all_labels_goodness, dim=1)
-            print("predicted labels: " + str(predicted_labels))
-            print("actual labels: " + str(labels))
+            logging.debug("predicted labels: " + str(predicted_labels))
+            logging.debug("actual labels: " + str(labels))
 
             total = data.size(0)
             correct = (predicted_labels == labels).sum().item()
@@ -399,11 +392,6 @@ class HiddenLayer(nn.Module):
     def train(self, optimizer, input_data, label_data, should_damp):
         optimizer.zero_grad()
 
-        # print("layer activations previous: " +
-        #       str(self.pos_activations.previous))
-        # print("layer activations current: " +
-        #       str(self.pos_activations.current))
-
         pos_activations = None
         neg_activations = None
         if input_data != None and label_data != None:
@@ -431,25 +419,6 @@ class HiddenLayer(nn.Module):
             neg_activations = self.forward(
                 ForwardMode.NegativeData, None, None, should_damp)
 
-        # print("----positive activations: " +
-        #       str(pos_activations.cpu().detach().numpy()))
-        # print("----negative activations: " +
-        #       str(neg_activations.cpu().detach().numpy()))
-
-        # print("-----positive activations:")
-        # for i in range(pos_activations.shape[0]):
-        #     for j in range(pos_activations.shape[1]):
-        #         print(pos_activations[i][j].item(), end=' ')
-        #     print()
-        # print()
-
-        # print("-----negative activations:")
-        # for i in range(pos_activations.shape[0]):
-        #     for j in range(pos_activations.shape[1]):
-        #         print(pos_activations[i][j].item(), end=' ')
-        #     print()
-        # print()
-
         pos_goodness = layer_activations_to_goodness(pos_activations)
         neg_goodness = layer_activations_to_goodness(neg_activations)
 
@@ -463,64 +432,12 @@ class HiddenLayer(nn.Module):
 
         layer_loss.backward()
 
-        # torchviz.make_dot(layer_loss, params=dict(
-        #     model.named_parameters())).render("graph", format="png")
-
-        # print("unclipped grads")
-        # if input_data != None:
-        #     print("[expect] first layer grad (forwards): " +
-        #           str(self.forward_linear.weight.grad))
-        #     print("[expect] first layer grad (backwards): " +
-        #           str(self.next_layer.backward_linear.weight.grad))
-        #     print("second layer grad (forwards): " +
-        #           str(self.next_layer.forward_linear.weight.grad))
-        #     print("second layer grad (backwards): " +
-        #           str(self.next_layer.next_layer.backward_linear.weight.grad))
-        # else:
-        #     print("first layer grad (forwards): " +
-        #           str(self.previous_layer.forward_linear.weight.grad))
-        #     print("first layer grad (backwards): " +
-        #           str(self.backward_linear.weight.grad))
-        #     print("[expect] second layer grad (forwards): " +
-        #           str(self.forward_linear.weight.grad))
-        #     print("[expect] second layer grad (backwards): " +
-        #           str(self.next_layer.backward_linear.weight.grad))
-
-        # input()
-
-        # torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1)
-
-        # print("clipped grads")
-        # if input_data != None:
-        #     print("[expect] first layer grad (forwards): " +
-        #           str(self.forward_linear.weight.grad))
-        #     print("[expect] first layer grad (backwards): " +
-        #           str(self.next_layer.backward_linear.weight.grad))
-        #     print("second layer grad (forwards): " +
-        #           str(self.next_layer.forward_linear.weight.grad))
-        #     print("second layer grad (backwards): " +
-        #           str(self.next_layer.next_layer.backward_linear.weight.grad))
-        # else:
-        #     print("first layer grad (forwards): " +
-        #           str(self.previous_layer.forward_linear.weight.grad))
-        #     print("first layer grad (backwards): " +
-        #           str(self.backward_linear.weight.grad))
-        #     print("[expect] second layer grad (forwards): " +
-        #           str(self.forward_linear.weight.grad))
-        #     print("[expect] second layer grad (backwards): " +
-        #           str(self.next_layer.backward_linear.weight.grad))
-
         optimizer.step()
         optimizer.zero_grad()
 
         return layer_loss
 
     def forward(self, mode, data, labels, should_damp):
-        # print("layer activations previous: " +
-        #       str(self.pos_activations.previous))
-        # print("layer activations current: " +
-        #       str(self.pos_activations.current))
-
         if data == None:
             assert self.previous_layer != None
         if labels == None:
@@ -628,7 +545,6 @@ class HiddenLayer(nn.Module):
             elif mode == ForwardMode.PredictData:
                 self.predict_activations.current = new_activation
 
-            # print("new activations: ", new_activation)
             return new_activation
 
         elif labels != None:
