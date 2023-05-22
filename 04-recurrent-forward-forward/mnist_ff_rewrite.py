@@ -34,8 +34,9 @@ logging.basicConfig(level=logging.DEBUG,
 EPOCHS = 1000
 ITERATIONS = 10
 THRESHOLD = 1
-LEARNING_RATE = 0.0001
 DAMPING_FACTOR = 0.7
+EPSILON = 1e-8
+LEARNING_RATE = 0.0001
 # LEARNING_RATE = 0.0001
 
 INPUT_SIZE = 784
@@ -462,11 +463,10 @@ class HiddenLayer(nn.Module):
             prev_layer_prev_timestep_activations = prev_layer_prev_timestep_activations.detach()
             prev_act = prev_act.detach()
 
-            epsilon = 1e-8
             next_layer_norm =next_layer_prev_timestep_activations / (next_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True) + epsilon)
+                p=2, dim=1, keepdim=True) + EPSILON)
             prev_layer_norm = prev_layer_prev_timestep_activations / (prev_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True) + epsilon)
+                p=2, dim=1, keepdim=True) + EPSILON)
             new_activation = F.relu(F.linear(prev_layer_norm, self.forward_linear.weight) +
                                     F.linear(next_layer_norm,
                                              self.next_layer.backward_linear.weight))
@@ -526,9 +526,8 @@ class HiddenLayer(nn.Module):
             prev_act = prev_act.detach()
             next_layer_prev_timestep_activations = next_layer_prev_timestep_activations.detach()
 
-            epsilon = 1e-8
             next_layer_norm = next_layer_prev_timestep_activations / (next_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True) + epsilon)
+                p=2, dim=1, keepdim=True) + EPSILON)
 
             new_activation = F.relu(F.linear(data, self.forward_linear.weight) + F.linear(
                 next_layer_norm, self.next_layer.backward_linear.weight))
@@ -562,9 +561,8 @@ class HiddenLayer(nn.Module):
             prev_act = prev_act.detach()
             prev_layer_prev_timestep_activations = prev_layer_prev_timestep_activations.detach()
 
-            epsilon = 1e-8
             prev_layer_norm = prev_layer_prev_timestep_activations / (prev_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True) + epsilon)
+                p=2, dim=1, keepdim=True) + EPSILON)
 
             new_activation = F.relu(F.linear(prev_layer_norm,
                                              self.forward_linear.weight) + F.linear(labels, self.next_layer.backward_linear.weight))
