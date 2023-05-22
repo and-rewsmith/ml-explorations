@@ -511,7 +511,6 @@ class HiddenLayer(nn.Module):
             return new_activation
 
         elif data != None:
-            # print("-----problematic activation case here")
             prev_act = None
             next_layer_prev_timestep_activations = None
             if mode == ForwardMode.PositiveData:
