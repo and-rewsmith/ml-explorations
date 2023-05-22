@@ -462,10 +462,11 @@ class HiddenLayer(nn.Module):
             prev_layer_prev_timestep_activations = prev_layer_prev_timestep_activations.detach()
             prev_act = prev_act.detach()
 
-            next_layer_norm = next_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True)
-            prev_layer_norm = prev_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True)
+            epsilon = 1e-8
+            next_layer_norm =next_layer_prev_timestep_activations / (next_layer_prev_timestep_activations.norm(
+                p=2, dim=1, keepdim=True) + epsilon)
+            prev_layer_norm = prev_layer_prev_timestep_activations / (prev_layer_prev_timestep_activations.norm(
+                p=2, dim=1, keepdim=True) + epsilon)
             new_activation = F.relu(F.linear(prev_layer_norm, self.forward_linear.weight) +
                                     F.linear(next_layer_norm,
                                              self.next_layer.backward_linear.weight))
@@ -525,11 +526,12 @@ class HiddenLayer(nn.Module):
             prev_act = prev_act.detach()
             next_layer_prev_timestep_activations = next_layer_prev_timestep_activations.detach()
 
-            next_layer_norm = next_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True)
+            epsilon = 1e-8
+            next_layer_norm = next_layer_prev_timestep_activations / (next_layer_prev_timestep_activations.norm(
+                p=2, dim=1, keepdim=True) + epsilon)
 
             new_activation = F.relu(F.linear(data, self.forward_linear.weight) + F.linear(
-                next_layer_prev_timestep_activations, self.next_layer.backward_linear.weight))
+                next_layer_norm, self.next_layer.backward_linear.weight))
 
             if should_damp:
                 old_activation = new_activation
@@ -560,10 +562,11 @@ class HiddenLayer(nn.Module):
             prev_act = prev_act.detach()
             prev_layer_prev_timestep_activations = prev_layer_prev_timestep_activations.detach()
 
-            prev_layer_norm = prev_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True)
+            epsilon = 1e-8
+            prev_layer_norm = prev_layer_prev_timestep_activations / (prev_layer_prev_timestep_activations.norm(
+                p=2, dim=1, keepdim=True) + epsilon)
 
-            new_activation = F.relu(F.linear(prev_layer_prev_timestep_activations,
+            new_activation = F.relu(F.linear(prev_layer_norm,
                                              self.forward_linear.weight) + F.linear(labels, self.next_layer.backward_linear.weight))
 
             if should_damp:
