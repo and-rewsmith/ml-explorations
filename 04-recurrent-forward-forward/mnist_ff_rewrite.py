@@ -31,10 +31,11 @@ logging.basicConfig(level=logging.DEBUG,
 # 9 - Try different optimizers
 # 10 - Model.eval()? We are not using it now.
 # 11 - Why are we getting an error?
+# 12 - Experiment with more optimizers
 
-EPOCHS = 10
+EPOCHS = 1000
 ITERATIONS = 10
-THRESHOLD = .25
+THRESHOLD = 1
 LEARNING_RATE = 0.001
 # LEARNING_RATE = 0.0001
 
@@ -105,7 +106,7 @@ class Activations:
         yield self.previous
 
     def advance(self):
-        self.previous = self.current
+        self.current = self.previous
 
 
 class OutputLayer(nn.Module):
@@ -223,10 +224,14 @@ class RecurrentFFNet(nn.Module):
                     data.shape[0], NUM_CLASSES, device=device)
                 one_hot_labels[:, label] = 1.0
 
-                for preinit in range(0, len(model.layers)):
+                for preinit in range(0, len(self.layers)):
                     logging.info("Preinitialization: " + str(preinit))
                     self.__advance_layers_forward(ForwardMode.PredictData,
                                                   data, one_hot_labels, False)
+
+                    # TODO: this can be refactored into advance layers forwards
+                    for layer in self.layers:
+                        layer.advance_stored_activations()
 
                 for iteration in range(0, ITERATIONS):
                     logging.info("Iteration: " + str(iteration))
@@ -235,10 +240,15 @@ class RecurrentFFNet(nn.Module):
 
                 # TODO: optimize this to not have lists
                 activations = [
-                    layer.predict_activations.current for layer in model.layers]
+                    layer.predict_activations.current for layer in self.layers]
+                # print("-----activations: " + str(activations))
                 goodness = activations_to_goodness(activations)
+                print("layer goodness for prediction" + " " +
+                      str(label) + ": " + str(goodness))
                 goodness = torch.stack(goodness, dim=1).mean(dim=1)
                 all_labels_goodness.append(goodness)
+                print("overall goodness for prediction" +
+                      str(label) + ": " + str(goodness))
 
             all_labels_goodness = torch.stack(all_labels_goodness, dim=1)
 
@@ -422,6 +432,8 @@ class HiddenLayer(nn.Module):
             neg_activations = self.forward(
                 ForwardMode.NegativeData, None, None, should_damp)
 
+        print("----positive activations: " + str(pos_activations))
+        print("----negative activations: " + str(neg_activations))
         pos_goodness = layer_activations_to_goodness(pos_activations)
         neg_goodness = layer_activations_to_goodness(neg_activations)
 
@@ -433,24 +445,54 @@ class HiddenLayer(nn.Module):
             neg_goodness - THRESHOLD
         ]))).mean()
 
-
         layer_loss.backward()
 
         # torchviz.make_dot(layer_loss, params=dict(
         #     model.named_parameters())).render("graph", format="png")
 
+        # print("unclipped grads")
         # if input_data != None:
-        #     print("[expect] first layer grad (forwards): " + str(self.forward_linear.weight.grad))
-        #     print("[expect] first layer grad (backwards): " + str(self.next_layer.backward_linear.weight.grad))
-        #     print("second layer grad (forwards): " + str(self.next_layer.forward_linear.weight.grad))
-        #     print("second layer grad (backwards): " + str(self.next_layer.next_layer.backward_linear.weight.grad))
+        #     print("[expect] first layer grad (forwards): " +
+        #           str(self.forward_linear.weight.grad))
+        #     print("[expect] first layer grad (backwards): " +
+        #           str(self.next_layer.backward_linear.weight.grad))
+        #     print("second layer grad (forwards): " +
+        #           str(self.next_layer.forward_linear.weight.grad))
+        #     print("second layer grad (backwards): " +
+        #           str(self.next_layer.next_layer.backward_linear.weight.grad))
         # else:
-        #     print("first layer grad (forwards): " + str(self.previous_layer.forward_linear.weight.grad))
-        #     print("first layer grad (backwards): " + str(self.backward_linear.weight.grad))
-        #     print("[expect] second layer grad (forwards): " + str(self.forward_linear.weight.grad))
-        #     print("[expect] second layer grad (backwards): " + str(self.next_layer.backward_linear.weight.grad))
+        #     print("first layer grad (forwards): " +
+        #           str(self.previous_layer.forward_linear.weight.grad))
+        #     print("first layer grad (backwards): " +
+        #           str(self.backward_linear.weight.grad))
+        #     print("[expect] second layer grad (forwards): " +
+        #           str(self.forward_linear.weight.grad))
+        #     print("[expect] second layer grad (backwards): " +
+        #           str(self.next_layer.backward_linear.weight.grad))
 
         # input()
+
+        # torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1)
+
+        # print("clipped grads")
+        # if input_data != None:
+        #     print("[expect] first layer grad (forwards): " +
+        #           str(self.forward_linear.weight.grad))
+        #     print("[expect] first layer grad (backwards): " +
+        #           str(self.next_layer.backward_linear.weight.grad))
+        #     print("second layer grad (forwards): " +
+        #           str(self.next_layer.forward_linear.weight.grad))
+        #     print("second layer grad (backwards): " +
+        #           str(self.next_layer.next_layer.backward_linear.weight.grad))
+        # else:
+        #     print("first layer grad (forwards): " +
+        #           str(self.previous_layer.forward_linear.weight.grad))
+        #     print("first layer grad (backwards): " +
+        #           str(self.backward_linear.weight.grad))
+        #     print("[expect] second layer grad (forwards): " +
+        #           str(self.forward_linear.weight.grad))
+        #     print("[expect] second layer grad (backwards): " +
+        #           str(self.next_layer.backward_linear.weight.grad))
 
         optimizer.step()
         optimizer.zero_grad()
@@ -537,6 +579,7 @@ class HiddenLayer(nn.Module):
             return new_activation
 
         elif data != None:
+            # print("-----problematic activation case here")
             prev_act = None
             next_layer_prev_timestep_activations = None
             if mode == ForwardMode.PositiveData:
@@ -550,6 +593,9 @@ class HiddenLayer(nn.Module):
                 prev_act = self.predict_activations.previous
             prev_act = prev_act.detach()
             next_layer_prev_timestep_activations = next_layer_prev_timestep_activations.detach()
+
+            next_layer_norm = next_layer_prev_timestep_activations.norm(
+                p=2, dim=1, keepdim=True)
 
             new_activation = F.relu(F.linear(data, self.forward_linear.weight) + F.linear(
                 next_layer_prev_timestep_activations, self.next_layer.backward_linear.weight))
@@ -566,6 +612,7 @@ class HiddenLayer(nn.Module):
             elif mode == ForwardMode.PredictData:
                 self.predict_activations.current = new_activation
 
+            # print("new activations: ", new_activation)
             return new_activation
 
         elif labels != None:
@@ -582,6 +629,9 @@ class HiddenLayer(nn.Module):
                 prev_act = self.predict_activations.previous
             prev_act = prev_act.detach()
             prev_layer_prev_timestep_activations = prev_layer_prev_timestep_activations.detach()
+
+            prev_layer_norm = prev_layer_prev_timestep_activations.norm(
+                p=2, dim=1, keepdim=True)
 
             new_activation = F.relu(F.linear(prev_layer_prev_timestep_activations,
                                              self.forward_linear.weight) + F.linear(labels, self.next_layer.backward_linear.weight))
