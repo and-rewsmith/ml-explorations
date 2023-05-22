@@ -16,7 +16,6 @@ logging.basicConfig(level=logging.DEBUG,
 
 # QUESTIONS:
 # 1 - First layer activations get very sparse?
-# 2 - Why is the validation goodness so much lower than the training goodness?
 
 # TODO:
 # 1 - Implement side connections as shown in Fig3
