@@ -9,17 +9,15 @@ from tqdm import tqdm
 import logging
 import torchviz
 from enum import Enum
+import numpy as np
 
 # logging.basicConfig(filename="log.log", level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 # QUESTIONS:
-# 1 - Why does lowering threshold allow it to work?
-# 2 - Layers are swapping between all high gooness predictions
-#     Investigate layer activations?
-#      Is there some bug?
-#     Is model struggling to optimize parameter for multiple local layer trainings?
+# 1 - First layer activations get very sparse?
+# 2 - Why is the validation goodness so much lower than the training goodness?
 # TODO:
 # 1 - Implement side connections as shown in Fig3
 # 3 - Implement dedicated recurrent weights
@@ -32,11 +30,13 @@ logging.basicConfig(level=logging.DEBUG,
 # 10 - Model.eval()? We are not using it now.
 # 11 - Why are we getting an error?
 # 12 - Experiment with more optimizers
+# 13 - cap loss offset from sufficiently learned examples (we shouldn't be seeing a goodness of like 7 for pos, it is too high and allowing other parts of the network to suffer)
 
 EPOCHS = 1000
 ITERATIONS = 10
 THRESHOLD = 1
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.0001
+DAMPING_FACTOR = 0.7
 # LEARNING_RATE = 0.0001
 
 INPUT_SIZE = 784
@@ -106,7 +106,7 @@ class Activations:
         yield self.previous
 
     def advance(self):
-        self.current = self.previous
+        self.previous = self.current
 
 
 class OutputLayer(nn.Module):
@@ -145,7 +145,7 @@ def layer_activations_to_goodness(layer_activations):
 class RecurrentFFNet(nn.Module):
     # Ties all the layers together.
     # TODO: look to see if I should be overriding reset_net()
-    def __init__(self, train_batch_size, test_batch_size, input_size, hidden_sizes, num_classes, damping_factor=0.7):
+    def __init__(self, train_batch_size, test_batch_size, input_size, hidden_sizes, num_classes, damping_factor=DAMPING_FACTOR):
         logging.info("initializing network")
         super(RecurrentFFNet, self).__init__()
 
@@ -225,7 +225,6 @@ class RecurrentFFNet(nn.Module):
                 one_hot_labels[:, label] = 1.0
 
                 for preinit in range(0, len(self.layers)):
-                    logging.info("Preinitialization: " + str(preinit))
                     self.__advance_layers_forward(ForwardMode.PredictData,
                                                   data, one_hot_labels, False)
 
@@ -234,7 +233,6 @@ class RecurrentFFNet(nn.Module):
                         layer.advance_stored_activations()
 
                 for iteration in range(0, ITERATIONS):
-                    logging.info("Iteration: " + str(iteration))
                     self.__advance_layers_forward(ForwardMode.PredictData,
                                                   data, one_hot_labels, True)
 
@@ -243,6 +241,7 @@ class RecurrentFFNet(nn.Module):
                     layer.predict_activations.current for layer in self.layers]
                 # print("-----activations: " + str(activations))
                 goodness = activations_to_goodness(activations)
+                # TODO: convert to DEBUG?
                 print("layer goodness for prediction" + " " +
                       str(label) + ": " + str(goodness))
                 goodness = torch.stack(goodness, dim=1).mean(dim=1)
@@ -357,6 +356,7 @@ class HiddenLayer(nn.Module):
         return self
 
     # TODO: we can optimize for memory by enabling distinct train / predict mode
+    # TODO: fix hacky isTraining flag
     def reset_activations(self, isTraining):
         activations_dim = None
         if isTraining:
@@ -364,23 +364,23 @@ class HiddenLayer(nn.Module):
         else:
             activations_dim = self.test_activations_dim
 
-        pos_activations_current = torch.randn(
+        pos_activations_current = torch.zeros(
             activations_dim[0], activations_dim[1]).to(device)
-        pos_activations_previous = torch.randn(
+        pos_activations_previous = torch.zeros(
             activations_dim[0], activations_dim[1]).to(device)
         self.pos_activations = Activations(
             pos_activations_current, pos_activations_previous)
 
-        neg_activations_current = torch.randn(
+        neg_activations_current = torch.zeros(
             activations_dim[0], activations_dim[1]).to(device)
-        neg_activations_previous = torch.randn(
+        neg_activations_previous = torch.zeros(
             activations_dim[0], activations_dim[1]).to(device)
         self.neg_activations = Activations(
             neg_activations_current, neg_activations_previous)
 
-        predict_activations_current = torch.randn(
+        predict_activations_current = torch.zeros(
             activations_dim[0], activations_dim[1]).to(device)
-        predict_activations_previous = torch.randn(
+        predict_activations_previous = torch.zeros(
             activations_dim[0], activations_dim[1]).to(device)
         self.predict_activations = Activations(
             predict_activations_current, predict_activations_previous)
@@ -420,7 +420,6 @@ class HiddenLayer(nn.Module):
             neg_activations = self.forward(
                 ForwardMode.NegativeData, neg_input, None, should_damp)
         elif label_data != None:
-            print("-----sanity check we are here")
             (pos_labels, neg_labels) = label_data
             pos_activations = self.forward(
                 ForwardMode.PositiveData, None, pos_labels, should_damp)
@@ -432,8 +431,25 @@ class HiddenLayer(nn.Module):
             neg_activations = self.forward(
                 ForwardMode.NegativeData, None, None, should_damp)
 
-        print("----positive activations: " + str(pos_activations))
-        print("----negative activations: " + str(neg_activations))
+        # print("----positive activations: " +
+        #       str(pos_activations.cpu().detach().numpy()))
+        # print("----negative activations: " +
+        #       str(neg_activations.cpu().detach().numpy()))
+
+        # print("-----positive activations:")
+        # for i in range(pos_activations.shape[0]):
+        #     for j in range(pos_activations.shape[1]):
+        #         print(pos_activations[i][j].item(), end=' ')
+        #     print()
+        # print()
+
+        # print("-----negative activations:")
+        # for i in range(pos_activations.shape[0]):
+        #     for j in range(pos_activations.shape[1]):
+        #         print(pos_activations[i][j].item(), end=' ')
+        #     print()
+        # print()
+
         pos_goodness = layer_activations_to_goodness(pos_activations)
         neg_goodness = layer_activations_to_goodness(neg_activations)
 
@@ -694,7 +710,7 @@ if __name__ == "__main__":
 
     # Create and run model.
     model = RecurrentFFNet(train_batch_size, test_batch_size, INPUT_SIZE, [
-        500], NUM_CLASSES).to(device)
+        500, 250], NUM_CLASSES).to(device)
 
     model.train(input_data, label_data, test_data)
 
