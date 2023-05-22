@@ -20,7 +20,6 @@ logging.basicConfig(level=logging.DEBUG,
 
 # TODO:
 # 1 - Implement side connections as shown in Fig3
-# 3 - Implement dedicated recurrent weights
 # 4 - Experiment with more layers
 # 5 - Experiment with weight initialization
 # 6 - Experiment with activation initialization
