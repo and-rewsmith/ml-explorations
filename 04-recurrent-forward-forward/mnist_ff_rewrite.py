@@ -206,6 +206,7 @@ class RecurrentFFNet(nn.Module):
             neg_goodness_per_layer = [
                 layer_activations_to_goodness(layer.neg_activations.current).mean() for layer in self.layers]
 
+            # Supports wandb tracking of max 3 layer goodnesses    
             try:            
                 first_layer_pos_goodness = pos_goodness_per_layer[0]
                 first_layer_neg_goodness = neg_goodness_per_layer[0]
