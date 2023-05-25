@@ -474,11 +474,6 @@ class HiddenLayer(nn.Module):
 
         layer_loss.backward()
 
-        # torchviz.make_dot(layer_loss, params=dict(
-        #     model.named_parameters())).render("graph", format="png")
-        #
-        # torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1)
-
         optimizer.step()
         optimizer.zero_grad()
 
