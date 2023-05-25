@@ -132,7 +132,7 @@ def activations_to_goodness(activations):
     goodness = []
     for act in activations:
         goodness_for_layer = torch.mean(
-            torch.square(act), dim=1).requires_grad_()
+            torch.square(act), dim=1)
         goodness.append(goodness_for_layer)
 
     return goodness
@@ -140,7 +140,7 @@ def activations_to_goodness(activations):
 
 def layer_activations_to_goodness(layer_activations):
     goodness_for_layer = torch.mean(
-        torch.square(layer_activations), dim=1).requires_grad_()
+        torch.square(layer_activations), dim=1)
 
     return goodness_for_layer
 
@@ -192,8 +192,6 @@ class RecurrentFFNet(nn.Module):
                                               input_data.pos_input, label_data.pos_labels, False)
                 self.__advance_layers_forward(ForwardMode.NegativeData,
                                               input_data.neg_input, label_data.neg_labels, False)
-                for layer in self.layers:
-                    layer.advance_stored_activations()
 
             for iteration in range(0, ITERATIONS):
                 logging.info("Iteration: " + str(iteration))
@@ -249,10 +247,6 @@ class RecurrentFFNet(nn.Module):
                     self.__advance_layers_forward(ForwardMode.PredictData,
                                                   data, one_hot_labels, False)
 
-                    # TODO: this can be refactored into advance layers forwards
-                    for layer in self.layers:
-                        layer.advance_stored_activations()
-
                 lower_iteration_threshold = ITERATIONS // 2 - 1
                 upper_iteration_threshold = ITERATIONS // 2 + 1
                 goodnesses = []
@@ -260,11 +254,8 @@ class RecurrentFFNet(nn.Module):
                     self.__advance_layers_forward(ForwardMode.PredictData,
                                                   data, one_hot_labels, True)
 
-                    # TODO: this can be refactored into advance layers forwards
                     layer_goodnesses = []
                     for layer in self.layers:
-                        layer.advance_stored_activations()
-                    
                         if _iteration >= lower_iteration_threshold and _iteration <= upper_iteration_threshold:
                             layer_goodnesses.append(layer_activations_to_goodness(layer.predict_activations.current))
 
@@ -319,7 +310,6 @@ class RecurrentFFNet(nn.Module):
         logging.debug("Trained activations for layer " +
                       str(i))
 
-        # TODO: comment why this is needed here but we have forward in train
         for layer in self.layers:
             layer.advance_stored_activations()
 
@@ -335,6 +325,9 @@ class RecurrentFFNet(nn.Module):
                 layer.forward(mode, None, label_data, should_damp)
             else:
                 layer.forward(mode, None, None, should_damp)
+
+        for layer in self.layers:
+            layer.advance_stored_activations()
 
 
 class HiddenLayer(nn.Module):
