@@ -11,6 +11,9 @@ import torchviz
 from enum import Enum
 import numpy as np
 
+import wandb
+
+
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -29,14 +32,15 @@ logging.basicConfig(level=logging.DEBUG,
 # 11 - Why are we getting an error?
 # 12 - Experiment with more optimizers
 # 13 - cap loss offset from sufficiently learned examples (we shouldn't be seeing a goodness of like 7 for pos, it is too high and allowing other parts of the network to suffer)
+# 14 - try layer norm layers
 
-EPOCHS = 1000
+EPOCHS = 1000000
 ITERATIONS = 10
 THRESHOLD = 1
 DAMPING_FACTOR = 0.7
 EPSILON = 1e-8
-LEARNING_RATE = 0.0001
-# LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.00005
+# LEARNING_RATE = 0.01
 
 INPUT_SIZE = 784
 NUM_CLASSES = 10
@@ -195,10 +199,34 @@ class RecurrentFFNet(nn.Module):
                 logging.info("Iteration: " + str(iteration))
                 total_loss = self.__advance_layers_train(
                     input_data, label_data, True)
-                logging.info("Average layer loss: " +
-                             str(total_loss / len(self.layers)))
+                average_layer_loss = (total_loss / len(self.layers)).item()
+                logging.info("Average layer loss: " + str(average_layer_loss))
 
-            self.predict(test_data)
+
+            pos_goodness_per_layer = [
+                layer_activations_to_goodness(layer.pos_activations.current).mean() for layer in self.layers]
+            neg_goodness_per_layer = [
+                layer_activations_to_goodness(layer.neg_activations.current).mean() for layer in self.layers]
+
+            try:            
+                first_layer_pos_goodness = pos_goodness_per_layer[0]
+                first_layer_neg_goodness = neg_goodness_per_layer[0]
+                second_layer_pos_goodness = pos_goodness_per_layer[1]
+                second_layer_neg_goodness = neg_goodness_per_layer[1]
+                third_layer_pos_goodness = pos_goodness_per_layer[2]
+                third_layer_neg_goodness = neg_goodness_per_layer[2]
+            except:
+                # No-op as there may not be 3 layers
+                pass
+
+            accuracy = self.predict(test_data)
+
+            if len(self.layers) == 3:
+                wandb.log({"acc": accuracy, "loss": average_layer_loss, "first_layer_pos_goodness": first_layer_pos_goodness, "second_layer_pos_goodness": second_layer_pos_goodness, "third_layer_pos_goodness": third_layer_pos_goodness, "first_layer_neg_goodness": first_layer_neg_goodness, "second_layer_neg_goodness": second_layer_neg_goodness, "third_layer_neg_goodness": third_layer_neg_goodness})
+            elif len(self.layers) == 2:
+                wandb.log({"acc": accuracy, "loss": average_layer_loss, "first_layer_pos_goodness": first_layer_pos_goodness, "second_layer_pos_goodness": second_layer_pos_goodness, "first_layer_neg_goodness": first_layer_neg_goodness, "second_layer_neg_goodness": second_layer_neg_goodness})
+            elif len(self.layers) == 1:
+                wandb.log({"acc": accuracy, "loss": average_layer_loss, "first_layer_pos_goodness": first_layer_pos_goodness, "first_layer_neg_goodness": first_layer_neg_goodness})
 
     def predict(self, test_data):
         with torch.no_grad():
@@ -225,17 +253,30 @@ class RecurrentFFNet(nn.Module):
                     for layer in self.layers:
                         layer.advance_stored_activations()
 
-                for iteration in range(0, ITERATIONS):
+                lower_iteration_threshold = ITERATIONS // 2 - 1
+                upper_iteration_threshold = ITERATIONS // 2 + 1
+                goodnesses = []
+                for _iteration in range(0, ITERATIONS):
                     self.__advance_layers_forward(ForwardMode.PredictData,
                                                   data, one_hot_labels, True)
 
-                # TODO: optimize this to not have lists
-                activations = [
-                    layer.predict_activations.current for layer in self.layers]
-                goodness = activations_to_goodness(activations)
-                # TODO: convert to DEBUG?
-                logging.debug("layer goodness for prediction" + " " +
-                      str(label) + ": " + str(goodness))
+                    # TODO: this can be refactored into advance layers forwards
+                    layer_goodnesses = []
+                    for layer in self.layers:
+                        layer.advance_stored_activations()
+                    
+                        if _iteration >= lower_iteration_threshold and _iteration <= upper_iteration_threshold:
+                            layer_goodnesses.append(layer_activations_to_goodness(layer.predict_activations.current))
+
+                    goodnesses.append(layer_goodnesses)
+                
+                torch.stack(goodnesses)
+                goodnesses = goodnesses.mean(dim=1)
+                goodnesses = goodnesses.mean(dim=0)
+
+
+                logging.debug("goodnesses for prediction" + " " +
+                      str(label) + ": " + str(goodnesses))
                 goodness = torch.stack(goodness, dim=1).mean(dim=1)
                 all_labels_goodness.append(goodness)
                 logging.debug("overall goodness for prediction" +
@@ -424,12 +465,19 @@ class HiddenLayer(nn.Module):
         logging.debug("pos goodness: " + str(pos_goodness))
         logging.debug("neg goodness: " + str(neg_goodness))
 
+        # Loss function equivelent to:
+        # z = log(1 + exp(((-x + 2) + (y - 2))/2)
         layer_loss = torch.log(1 + torch.exp(torch.cat([
             (-1 * pos_goodness) + THRESHOLD,
             neg_goodness - THRESHOLD
         ]))).mean()
 
         layer_loss.backward()
+
+        # torchviz.make_dot(layer_loss, params=dict(
+        #     model.named_parameters())).render("graph", format="png")
+        #
+        # torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1)
 
         optimizer.step()
         optimizer.zero_grad()
@@ -462,12 +510,20 @@ class HiddenLayer(nn.Module):
             prev_layer_prev_timestep_activations = prev_layer_prev_timestep_activations.detach()
             prev_act = prev_act.detach()
 
-            next_layer_norm =next_layer_prev_timestep_activations / (next_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True) + EPSILON)
-            prev_layer_norm = prev_layer_prev_timestep_activations / (prev_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True) + EPSILON)
-            new_activation = F.relu(F.linear(prev_layer_norm, self.forward_linear.weight) +
-                                    F.linear(next_layer_norm,
+            # Compute mean and standard deviation for next_layer
+            next_layer_mean = next_layer_prev_timestep_activations.mean(dim=1, keepdim=True)
+            next_layer_std = next_layer_prev_timestep_activations.std(dim=1, keepdim=True)
+
+            # Compute mean and standard deviation for prev_layer
+            prev_layer_mean = prev_layer_prev_timestep_activations.mean(dim=1, keepdim=True)
+            prev_layer_std = prev_layer_prev_timestep_activations.std(dim=1, keepdim=True)
+
+            # Apply standardization
+            next_layer_stdized = (next_layer_prev_timestep_activations - next_layer_mean) / (next_layer_std + EPSILON)
+            prev_layer_stdized = (prev_layer_prev_timestep_activations - prev_layer_mean) / (prev_layer_std + EPSILON)
+
+            new_activation = F.relu(F.linear(prev_layer_stdized, self.forward_linear.weight) +
+                                    F.linear(next_layer_stdized,
                                              self.next_layer.backward_linear.weight))
             if should_damp:
                 old_activation = new_activation
@@ -525,11 +581,15 @@ class HiddenLayer(nn.Module):
             prev_act = prev_act.detach()
             next_layer_prev_timestep_activations = next_layer_prev_timestep_activations.detach()
 
-            next_layer_norm = next_layer_prev_timestep_activations / (next_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True) + EPSILON)
+            # Compute mean and standard deviation for next_layer
+            next_layer_mean = next_layer_prev_timestep_activations.mean(dim=1, keepdim=True)
+            next_layer_std = next_layer_prev_timestep_activations.std(dim=1, keepdim=True)
+
+            # Apply standardization
+            next_layer_stdized = (next_layer_prev_timestep_activations - next_layer_mean) / (next_layer_std + EPSILON)
 
             new_activation = F.relu(F.linear(data, self.forward_linear.weight) + F.linear(
-                next_layer_norm, self.next_layer.backward_linear.weight))
+                next_layer_stdized, self.next_layer.backward_linear.weight))
 
             if should_damp:
                 old_activation = new_activation
@@ -560,10 +620,14 @@ class HiddenLayer(nn.Module):
             prev_act = prev_act.detach()
             prev_layer_prev_timestep_activations = prev_layer_prev_timestep_activations.detach()
 
-            prev_layer_norm = prev_layer_prev_timestep_activations / (prev_layer_prev_timestep_activations.norm(
-                p=2, dim=1, keepdim=True) + EPSILON)
+            # Compute mean and standard deviation for prev_layer
+            prev_layer_mean = prev_layer_prev_timestep_activations.mean(dim=1, keepdim=True)
+            prev_layer_std = prev_layer_prev_timestep_activations.std(dim=1, keepdim=True)
 
-            new_activation = F.relu(F.linear(prev_layer_norm,
+            # Apply standardization
+            prev_layer_stdized = (prev_layer_prev_timestep_activations - prev_layer_mean) / (prev_layer_std + EPSILON)
+
+            new_activation = F.relu(F.linear(prev_layer_stdized,
                                              self.forward_linear.weight) + F.linear(labels, self.next_layer.backward_linear.weight))
 
             if should_damp:
@@ -590,6 +654,26 @@ if __name__ == "__main__":
     # Pytorch utils.
     torch.autograd.set_detect_anomaly(True)
     torch.manual_seed(1234)
+
+    layers = [500, 250, 200]
+
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="Recurrent-FF",
+        
+        # track hyperparameters and run metadata
+        config={
+        "architecture": "Recurrent-FF",
+        "dataset": "MNIST",
+        "epochs": EPOCHS,
+        "learning_rate": LEARNING_RATE,
+        "layers": str(layers),
+        "iterations": ITERATIONS,
+        "threshold": THRESHOLD,
+        "damping_factor": DAMPING_FACTOR,
+        "epsilon": EPSILON,
+        }
+    )
 
     # Generate train data.
     train_loader, test_loader = MNIST_loaders()
@@ -623,8 +707,7 @@ if __name__ == "__main__":
     test_data = TestData(x, one_hot_labels, labels)
 
     # Create and run model.
-    model = RecurrentFFNet(train_batch_size, test_batch_size, INPUT_SIZE, [
-        500, 250], NUM_CLASSES).to(device)
+    model = RecurrentFFNet(train_batch_size, test_batch_size, INPUT_SIZE, layers, NUM_CLASSES).to(device)
 
     model.train(input_data, label_data, test_data)
 
