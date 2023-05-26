@@ -254,25 +254,28 @@ class RecurrentFFNet(nn.Module):
                 for _iteration in range(0, ITERATIONS):
                     self.__advance_layers_forward(ForwardMode.PredictData,
                                                   data, one_hot_labels, True)
-
-                    layer_goodnesses = []
-                    for layer in self.layers:
-                        if _iteration >= lower_iteration_threshold and _iteration <= upper_iteration_threshold:
+                    
+                    if _iteration >= lower_iteration_threshold and  _iteration <= upper_iteration_threshold:
+                        layer_goodnesses = []
+                        for layer in self.layers:
                             layer_goodnesses.append(layer_activations_to_goodness(layer.predict_activations.current))
 
-                    goodnesses.append(layer_goodnesses)
-                
-                torch.stack(goodnesses)
+                        goodnesses.append(torch.stack(layer_goodnesses, dim=1))
+
+                # tensor of shape (batch_size, iterations, num_layers) 
+                goodnesses = torch.stack(goodnesses, dim=1)
+                print(goodnesses.shape)
+                # average over iterations
                 goodnesses = goodnesses.mean(dim=1)
-                goodnesses = goodnesses.mean(dim=0)
+                print(goodnesses.shape)
+                # average over layers
+                # TODO: this is probably a bug and should be dim=1
+                goodness = goodnesses.mean(dim=1)
 
 
-                logging.debug("goodnesses for prediction" + " " +
-                      str(label) + ": " + str(goodnesses))
-                goodness = torch.stack(goodness, dim=1).mean(dim=1)
-                all_labels_goodness.append(goodness)
-                logging.debug("overall goodness for prediction" +
+                logging.debug("goodness for prediction" + " " +
                       str(label) + ": " + str(goodness))
+                all_labels_goodness.append(goodness)
 
             all_labels_goodness = torch.stack(all_labels_goodness, dim=1)
 
