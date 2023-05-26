@@ -1,18 +1,16 @@
+from enum import Enum
+import logging
+
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.optim import Adam
+from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 from torchvision.transforms import Compose, ToTensor, Normalize, Lambda
-from torch.utils.data import DataLoader
-from torch.optim import Adam
-from tqdm import tqdm
-import logging
 import torchviz
-from enum import Enum
-import numpy as np
-
 import wandb
-
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,17 +20,12 @@ logging.basicConfig(level=logging.DEBUG,
 
 # TODO:
 # 1 - Implement side connections as shown in Fig3
-# 4 - Experiment with more layers
-# 5 - Experiment with weight initialization
-# 6 - Experiment with activation initialization
-# 7 - Docstrings
-# 8 - Stop using nn.Linear if all we need are simple weights
-# 9 - Try different optimizers
-# 10 - Model.eval()? We are not using it now.
-# 11 - Why are we getting an error?
-# 12 - Experiment with more optimizers
-# 13 - cap loss offset from sufficiently learned examples (we shouldn't be seeing a goodness of like 7 for pos, it is too high and allowing other parts of the network to suffer)
-# 14 - try layer norm layers
+# 2 - Experiment with more layers
+# 3 - Experiment with weight initialization
+# 4 - Stop using nn.Linear if all we need are simple weights
+# 5 - Try different optimizers
+# 6 - Model.eval()? We are not using it now.
+# 7 - try layer norm layers
 
 EPOCHS = 1000000
 ITERATIONS = 10
@@ -40,7 +33,7 @@ THRESHOLD = 1
 DAMPING_FACTOR = 0.7
 EPSILON = 1e-8
 LEARNING_RATE = 0.00005
-# LEARNING_RATE = 0.01
+LAYERS = [500, 250, 200]
 
 INPUT_SIZE = 784
 NUM_CLASSES = 10
@@ -127,8 +120,28 @@ class ForwardMode(Enum):
 
 
 # TODO: optimize this to not have lists
-# TODO: no more requires_grad
 def activations_to_goodness(activations):
+    """
+    Computes the 'goodness' of activations for each layer in a neural network by
+    taking the mean of the squared values.
+
+    'Goodness' in this context refers to the average squared activation value.
+    This function is designed to work with PyTorch tensors, which represent
+    layers in a neural network.
+
+    Args:
+        activations (list of torch.Tensor): A list of tensors representing
+        activations from each layer of a neural network. Each tensor in the list
+        corresponds to one layer's activations, and has shape (batch_size,
+        num_activations), where batch_size is the number of samples processed
+        together, and num_activations is the number of neurons in the layer.
+
+    Returns:
+        list of torch.Tensor: A list of tensors, each tensor corresponding to
+        the 'goodness' (mean of the squared activations) of each layer in the
+        input. Each tensor in the output list has shape (batch_size,), since the
+        mean is taken over the activation values for each sample in the batch.
+    """
     goodness = []
     for act in activations:
         goodness_for_layer = torch.mean(
@@ -139,6 +152,26 @@ def activations_to_goodness(activations):
 
 
 def layer_activations_to_goodness(layer_activations):
+    """
+    Computes the 'goodness' of activations for a given layer in a neural network
+    by taking the mean of the squared values.
+
+    'Goodness' in this context refers to the average squared activation value.
+    This function is designed to work with PyTorch tensors, which represent the
+    layer's activations.
+
+    Args:
+        layer_activations (torch.Tensor): A tensor representing activations from
+        one layer of a neural network. The tensor has shape (batch_size,
+        num_activations), where batch_size is the number of samples processed
+        together, and num_activations is the number of neurons in the layer.
+
+    Returns:
+        torch.Tensor: A tensor corresponding to the 'goodness' (mean of the
+        squared activations) of the given layer. The output tensor has shape
+        (batch_size,), since the mean is taken over the activation values for
+        each sample in the batch.
+    """
     goodness_for_layer = torch.mean(
         torch.square(layer_activations), dim=1)
 
@@ -146,6 +179,32 @@ def layer_activations_to_goodness(layer_activations):
 
 
 class RecurrentFFNet(nn.Module):
+    """
+    Implements a Recurrent Forward-Forward Network (RecurrentFFNet) based on
+    PyTorch's nn.Module.
+
+    This class represents a multi-layer network composed of an input layer, one
+    or more hidden layers, and an output layer. Unlike traditional feed-forward
+    networks, the hidden layers in this network are recurrent, i.e., they are
+    connected back to themselves across timesteps. 
+
+    The learning procedure used here is a variant of the "Forward-Forward"
+    algorithm, which is a greedy multi-layer learning method inspired by
+    Boltzmann machines and Noise Contrastive Estimation. Instead of a
+    traditional forward and backward pass, this algorithm employs two forward
+    passes operating on different data and with contrasting objectives.
+
+    During training, a "positive" pass operates on real input data and adjusts
+    the weights to increase the 'goodness' in each hidden layer. The 'goodness'
+    is calculated as the sum of squared activation values. On the other hand, a
+    "negative" pass operates on "negative data" and adjusts the weights to
+    decrease the 'goodness' in each hidden layer.
+
+    The hidden layers and output layer are instances of the HiddenLayer and
+    OutputLayer classes, respectively. The hidden layers are connected to each
+    other and the output layer, forming a fully connected recurrent
+    architecture.
+    """
     # Ties all the layers together.
     # TODO: look to see if I should be overriding reset_net()
     def __init__(self, train_batch_size, test_batch_size, input_size, hidden_sizes, num_classes, damping_factor=DAMPING_FACTOR):
@@ -182,6 +241,44 @@ class RecurrentFFNet(nn.Module):
             layer.reset_activations(isTraining)
 
     def train(self, input_data, label_data, test_data):
+        """
+        Trains the RecurrentFFNet model using the provided input data and label
+        data.
+
+        Args:
+            input_data (object): An object containing positive and negative
+            input data tensors. 
+
+            label_data (object): An object containing positive and negative
+            label data tensors.
+
+            test_data (tuple): A tuple containing the test data, one-hot labels,
+            and the actual labels.
+
+        Procedure:
+            For each epoch, the method resets the network's activations and
+            performs a preinitialization step, forwarding both positive and
+            negative data through the network. It then runs a specified number
+            of iterations, where it trains the network using the input and label
+            data. 
+
+            After each epoch, the method calculates the 'goodness' metric for
+            each layer in the network (for both positive and negative data),
+            averages the layer losses, and then calculates the prediction
+            accuracy on the test data. 
+
+            Finally, the method logs these metrics (accuracy, average loss, and
+            layer-wise 'goodness' scores) for monitoring the training process.
+            The metrics logged depend on the number of layers in the network.
+
+        Note:
+            'Goodness' here refers to a metric that indicates how well the
+            model's current activations represent a given class. It's calculated
+            by a function `layer_activations_to_goodness` (not shown in this
+            code), which transforms a layer's activations into a 'goodness'
+            score. This function operates on the RecurrentFFNet model level and
+            is called during the training process.
+        """
         for epoch in range(0, EPOCHS):
             logging.info("Epoch: " + str(epoch))
             self.reset_activations(True)
@@ -228,6 +325,38 @@ class RecurrentFFNet(nn.Module):
                 wandb.log({"acc": accuracy, "loss": average_layer_loss, "first_layer_pos_goodness": first_layer_pos_goodness, "first_layer_neg_goodness": first_layer_neg_goodness})
 
     def predict(self, test_data):
+        """
+        This function predicts the class labels for the provided test data using
+        the trained RecurrentFFNet model. 
+
+        Args:
+            test_data (object): A tuple containing the test data, one-hot labels,
+            and the actual labels. The data is assumed to be PyTorch tensors.
+
+        Returns:
+            float: The prediction accuracy as a percentage.
+
+        Procedure:
+            The function first moves the test data and labels to the appropriate
+            device. It then calculates the 'goodness' metric for each possible
+            class label, using a two-step process:
+
+                1. Resetting the network's activations and forwarding the data
+                   through the network with the current label.
+                2. For each iteration within a specified threshold, forwarding
+                   the data again, but this time retaining the
+                activations, which are used to calculate the 'goodness' for each
+                layer.
+
+            The 'goodness' values across iterations and layers are then averaged
+            to produce a single 'goodness' score for each class label. The class
+            with the highest 'goodness' score is chosen as the prediction for
+            each test sample.
+
+            Finally, the function calculates the overall accuracy of the model's
+            predictions by comparing them to the actual labels and returns this
+            accuracy.
+        """
         with torch.no_grad():
             data, one_hot_labels, labels = test_data
             data = data.to(device)
@@ -269,7 +398,6 @@ class RecurrentFFNet(nn.Module):
                 goodnesses = goodnesses.mean(dim=1)
                 print(goodnesses.shape)
                 # average over layers
-                # TODO: this is probably a bug and should be dim=1
                 goodness = goodnesses.mean(dim=1)
 
 
@@ -293,6 +421,34 @@ class RecurrentFFNet(nn.Module):
         return accuracy
 
     def __advance_layers_train(self, input_data, label_data, should_damp):
+        """
+        Advances the training process for all layers in the network by computing
+        the loss for each layer and updating their activations. 
+
+        The method handles different layer scenarios: if it's a single layer,
+        both the input data and label data are used for training. If it's the
+        first or last layer in a multi-layer configuration, only the input data
+        or label data is used, respectively. For layers in the middle of a
+        multi-layer network, neither the input data nor the label data is used.
+
+        Args:
+            input_data (torch.Tensor): The input data for the network.
+
+            label_data (torch.Tensor): The target labels for the network.
+
+            should_damp (bool): A flag to determine whether the activation
+            damping should be applied during training.
+
+        Returns:
+            total_loss (float): The accumulated loss over all layers in the
+            network during the current training step.
+
+        Note:
+            The layer's 'train' method is expected to return a loss value, which
+            is accumulated to compute the total loss for the network. After
+            training each layer, their stored activations are advanced by
+            calling the 'advance_stored_activations' method.
+        """
         total_loss = 0
         for i, layer in enumerate(self.layers):
             logging.debug("Training layer " + str(i))
@@ -320,6 +476,39 @@ class RecurrentFFNet(nn.Module):
         return total_loss
 
     def __advance_layers_forward(self, mode, input_data, label_data, should_damp):
+        """
+        Executes a forward pass through all layers of the network using the
+        given mode, input data, label data, and a damping flag.
+
+        The method handles different layer scenarios: if it's a single layer,
+        both the input data and label data are used for the forward pass. If
+        it's the first or last layer in a multi-layer configuration, only the
+        input data or label data is used, respectively. For layers in the middle
+        of a multi-layer network, neither the input data nor the label data is
+        used.
+
+        After the forward pass, the method advances the stored activations for
+        all layers.
+
+        Args:
+            mode (ForwardMode): An enum representing the mode of forward
+            propagation. This could be PositiveData, NegativeData, or
+            PredictData. input_data
+
+            (torch.Tensor): The input data for the
+            network.
+            
+            label_data (torch.Tensor): The target labels for the
+            network.
+            
+            should_damp (bool): A flag to determine whether the
+            activation damping should be applied during the forward pass.
+
+        Note:
+            This method doesn't return any value. It modifies the internal state
+            of the layers by performing a forward pass and advancing their
+            stored activations.
+        """
         for i, layer in enumerate(self.layers):
             if i == 0 and len(self.layers) == 1:
                 layer.forward(mode, input_data, label_data, should_damp)
@@ -335,6 +524,30 @@ class RecurrentFFNet(nn.Module):
 
 
 class HiddenLayer(nn.Module):
+    """
+    A HiddenLayer class for a novel Forward-Forward Recurrent Network, with
+    inspiration drawn from Boltzmann Machines and Noise Contrastive Estimation.
+    This network design is characterized by two distinct forward passes, each
+    with specific objectives: one is dedicated to processing positive ("real")
+    data with the aim of enhancing the 'goodness' across every hidden layer,
+    while the other is tasked with processing negative data and adjusting the
+    weights to reduce the 'goodness' metric. 
+
+    The HiddenLayer is essentially a node within this network, with possible
+    connections to both preceding and succeeding layers, depending on its
+    specific location within the network architecture. The first layer in this
+    setup is connected directly to the input data, and the last layer maintains
+    a connection to the output data. The intermediate layers establish a link to
+    both their previous and next layers, if available. 
+
+    In each HiddenLayer, a forward linear transformation and a backward linear
+    transformation are defined. The forward transformation is applied to the
+    activations from the previous layer, while the backward transformation is
+    applied to the activations of the subsequent layer. The forward
+    transformation helps in propagating the data through the network, and the
+    backward transformation is key in the learning process where it aids in the
+    adjustment of weights based on the output or next layer's activations.
+    """
     def __init__(self, train_batch_size, test_batch_size, prev_size, size, damping_factor):
         super(HiddenLayer, self).__init__()
 
@@ -356,6 +569,12 @@ class HiddenLayer(nn.Module):
         self.next_layer = None
 
     def _apply(self, fn):
+        """
+        Override apply, but we don't want to apply to sibling layers as that
+        will cause a stack overflow. The hidden layers are contained in a
+        collection in the higher-level RecurrentFFNet. They will all get the
+        apply call from there.
+        """
         # Apply `fn` to each parameter and buffer of this layer
         for param in self._parameters.values():
             if param is not None:
@@ -477,11 +696,56 @@ class HiddenLayer(nn.Module):
         return layer_loss
 
     def forward(self, mode, data, labels, should_damp):
+        """
+        Propagates input data forward through the network, updating the
+        activation state of the current layer based on the operating mode. 
+
+        Handles various scenarios depending on the layer configuration in the
+        network (input layer, output layer, or a middle layer).
+
+        Args:
+            mode (ForwardMode enum): Indicates the type of data being propagated
+            (positive, negative, or prediction).
+
+            data (torch.Tensor or None): The input data for the layer. If
+            `None`, it indicates that this layer is not the input layer.
+
+            labels (torch.Tensor or None): The target labels for the layer. If
+            `None`, it indicates that this layer is not the output layer.
+            
+            should_damp (bool): A flag to determine whether the activation
+            damping should be applied.
+
+        Returns:
+            new_activation (torch.Tensor): The updated activation state of the
+            layer after the forward propagation.
+
+        Note:
+            'Damping' here refers to a technique used to smoothen the changes in
+            the layer activations over time. In this function, damping is
+            implemented as a weighted average of the previous and the newly
+            computed activations, controlled by the `self.damping_factor`.
+            
+            The function expects to receive input data and/or labels depending
+            on the layer. The absence of both implies the current layer is a
+            'middle' layer. If only the labels are missing, this layer is an
+            'input' layer, while if only the data is missing, it's an 'output'
+            layer. If both are provided, the network has only a single layer.
+
+            All four scenarios are handled separately in the function, although
+            the general procedure is similar: compute new activations based on
+            the received inputs (and possibly, depending on the layer's
+            position, the activations of the adjacent layers), optionally apply
+            damping, update the current layer's activations, and return the new
+            activations.
+        """
+        # Make sure assumptions aren't violated regarding layer connectivity.
         if data == None:
             assert self.previous_layer != None
         if labels == None:
             assert self.next_layer != None
 
+        # Middle layer.
         if data == None and labels == None:
             next_layer_prev_timestep_activations = None
             prev_layer_prev_timestep_activations = None
@@ -531,6 +795,8 @@ class HiddenLayer(nn.Module):
 
             return new_activation
 
+        # Single layer scenario. Hidden layer connected to input layer and
+        # output layer.
         elif data != None and labels != None:
             prev_act = None
             if mode == ForwardMode.PositiveData:
@@ -558,6 +824,7 @@ class HiddenLayer(nn.Module):
 
             return new_activation
 
+        # Input layer scenario. Connected to input layer and hidden layer.
         elif data != None:
             prev_act = None
             next_layer_prev_timestep_activations = None
@@ -597,6 +864,7 @@ class HiddenLayer(nn.Module):
 
             return new_activation
 
+        # Output layer scenario. Connected to hidden layer and output layer.
         elif labels != None:
             prev_layer_prev_timestep_activations = None
             prev_act = None
@@ -647,8 +915,6 @@ if __name__ == "__main__":
     torch.autograd.set_detect_anomaly(True)
     torch.manual_seed(1234)
 
-    layers = [500, 250, 200]
-
     wandb.init(
         # set the wandb project where this run will be logged
         project="Recurrent-FF",
@@ -659,7 +925,7 @@ if __name__ == "__main__":
         "dataset": "MNIST",
         "epochs": EPOCHS,
         "learning_rate": LEARNING_RATE,
-        "layers": str(layers),
+        "layers": str(LAYERS),
         "iterations": ITERATIONS,
         "threshold": THRESHOLD,
         "damping_factor": DAMPING_FACTOR,
@@ -699,7 +965,7 @@ if __name__ == "__main__":
     test_data = TestData(x, one_hot_labels, labels)
 
     # Create and run model.
-    model = RecurrentFFNet(train_batch_size, test_batch_size, INPUT_SIZE, layers, NUM_CLASSES).to(device)
+    model = RecurrentFFNet(train_batch_size, test_batch_size, INPUT_SIZE, LAYERS, NUM_CLASSES).to(device)
 
     model.train(input_data, label_data, test_data)
 
